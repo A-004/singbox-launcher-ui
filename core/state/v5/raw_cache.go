@@ -204,6 +204,12 @@ func DeleteOrphans(subsDir string, knownIDs []string) ([]string, error) {
 			continue
 		}
 		id := strings.TrimSuffix(name, rawSuffix)
+		// Defensive: deletion ограничена на файлы с валидными ULID-id'ами.
+		// Файлы с произвольными именами (user manual drops, чужие процессы,
+		// corrupt FS) не наши — оставляем нетронутыми.
+		if err := validateID(id); err != nil {
+			continue
+		}
 		if _, ok := knownSet[id]; ok {
 			continue
 		}
