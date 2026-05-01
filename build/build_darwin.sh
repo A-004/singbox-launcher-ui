@@ -184,11 +184,23 @@ else
 fi
 echo "Minimum macOS version: $MIN_MACOS_VERSION"
 
+# RequiredTemplateRef is pinned to the exact commit being built. Each release
+# binary thus fetches wizard_template.json from that frozen commit, never the
+# branch HEAD — see SPEC 046.
+TEMPLATE_REF=$(git rev-parse HEAD 2>/dev/null || echo "")
+if [ -z "$TEMPLATE_REF" ]; then
+    echo "!!! Could not resolve git HEAD for RequiredTemplateRef; aborting !!!"
+    exit 1
+fi
+echo "Template ref: $TEMPLATE_REF"
+
+LDFLAGS="-s -w -X singbox-launcher/internal/constants.AppVersion=$VERSION -X singbox-launcher/internal/constants.RequiredTemplateRef=$TEMPLATE_REF"
+
 if [ "$BUILD_TYPE" = "universal" ]; then
     echo ""
     echo "=== Building for arm64 (Apple Silicon) ==="
     TEMP_ARM64="${BASE_NAME}_arm64"
-    GOARCH=arm64 go build -buildvcs=false -ldflags="-s -w -X singbox-launcher/internal/constants.AppVersion=$VERSION" -o "$TEMP_ARM64"
+    GOARCH=arm64 go build -buildvcs=false -ldflags="$LDFLAGS" -o "$TEMP_ARM64"
 
     if [ $? -ne 0 ]; then
         echo "!!! Build failed for arm64 !!!"
@@ -198,7 +210,7 @@ if [ "$BUILD_TYPE" = "universal" ]; then
     echo ""
     echo "=== Building for amd64 (Intel) ==="
     TEMP_AMD64="${BASE_NAME}_amd64"
-    GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w -X singbox-launcher/internal/constants.AppVersion=$VERSION" -o "$TEMP_AMD64"
+    GOARCH=amd64 go build -buildvcs=false -ldflags="$LDFLAGS" -o "$TEMP_AMD64"
 
     if [ $? -ne 0 ]; then
         echo "!!! Build failed for amd64 !!!"
@@ -226,7 +238,7 @@ if [ "$BUILD_TYPE" = "universal" ]; then
 elif [ "$BUILD_TYPE" = "arm64" ]; then
     echo ""
     echo "=== Building for arm64 (Apple Silicon) ==="
-    GOARCH=arm64 go build -buildvcs=false -ldflags="-s -w -X singbox-launcher/internal/constants.AppVersion=$VERSION" -o "$OUTPUT_FILENAME"
+    GOARCH=arm64 go build -buildvcs=false -ldflags="$LDFLAGS" -o "$OUTPUT_FILENAME"
 
     if [ $? -ne 0 ]; then
         echo "!!! Build failed for arm64 !!!"
@@ -239,7 +251,7 @@ elif [ "$BUILD_TYPE" = "arm64" ]; then
 else
     echo ""
     echo "=== Building for amd64 (Intel) ==="
-    GOARCH=amd64 go build -buildvcs=false -ldflags="-s -w -X singbox-launcher/internal/constants.AppVersion=$VERSION" -o "$OUTPUT_FILENAME"
+    GOARCH=amd64 go build -buildvcs=false -ldflags="$LDFLAGS" -o "$OUTPUT_FILENAME"
 
     if [ $? -ne 0 ]; then
         echo "!!! Build failed for amd64 !!!"
@@ -381,6 +393,32 @@ if [ "$COPY_TO_APPLICATIONS" = true ]; then
     fi
     rm -rf "$APP_NAME"
     echo "Removed local bundle: $(pwd)/$APP_NAME"
+
+    # macOS Sonoma+ kills binaries with invalid code signatures (SIGKILL
+    # "Code Signature Invalid"). After replacing the executable in-place,
+    # we ad-hoc resign it so launches work without manual intervention.
+    #
+    # Direct codesign on a path inside .app fails because codesign treats
+    # the bundle as context and tries to sign every Contents/MacOS/* file
+    # — which includes root-owned `bin/logs/sing-box.log` and `.raw` files.
+    # Workaround: copy binary out of bundle, sign standalone with explicit
+    # identifier, copy back.
+    echo "=== Re-signing executable (ad-hoc) ==="
+    SIGN_TMP="/tmp/${BASE_NAME}_sign_$$"
+    if cp "$DEST_BIN" "$SIGN_TMP" && \
+       codesign --remove-signature "$SIGN_TMP" 2>/dev/null ; \
+       codesign --force --sign - --identifier com.singbox.launcher "$SIGN_TMP" 2>&1 ; \
+    then
+        cp "$SIGN_TMP" "$DEST_BIN" && chmod +x "$DEST_BIN"
+        rm -f "$SIGN_TMP"
+        echo "Re-signed: $DEST_BIN"
+    else
+        rm -f "$SIGN_TMP"
+        echo "WARNING: ad-hoc resign failed; macOS may refuse to launch the app"
+        echo "  Try manually: sudo codesign --force --deep --sign - $DEST_APP"
+    fi
+    # Strip quarantine attribute (just in case it got added by some flow).
+    xattr -dr com.apple.quarantine "$DEST_APP" 2>/dev/null || true
     echo "========================================"
 else
     echo "To install or update in /Applications:"

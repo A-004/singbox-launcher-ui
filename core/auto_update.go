@@ -3,221 +3,304 @@ package core
 import (
 	"time"
 
-	"fyne.io/fyne/v2"
-
-	"singbox-launcher/core/config/parser"
+	"singbox-launcher/core/events"
+	"singbox-launcher/core/state"
 	"singbox-launcher/internal/ctxutil"
 	"singbox-launcher/internal/debuglog"
-	"singbox-launcher/internal/dialogs"
 	"singbox-launcher/internal/platform"
 )
 
-// Constants for auto-update configuration
+// SPEC 052 phase 8 — event-driven per-source auto-update.
+//
+// Старая модель (одна попытка на ВСЕ подписки + 2 retry × 20 сек) заменена на:
+//
+//   - **Heartbeat 1 час**: на каждом тике пробег по `state.Connections.Sources[]`.
+//     Для каждой enabled subscription смотрим `meta.last_fetched_at`. Если
+//     `now - last_fetched_at >= effective_reload` (per-source override или
+//     `defaults.reload`) → fetch только этого source через
+//     `RefreshSingleSubscription(id)`. Свежие источники пропускаются.
+//
+//   - **Failure → 15-сек retry**: если RefreshSingleSubscription вернул
+//     ошибку, планируем `time.AfterFunc(15s, retry)`. Один retry — не
+//     рекурсивный; если retry тоже упал, ждём следующий heartbeat (1ч)
+//     или VPN-event.
+//
+//   - **VPN-event trigger**: подписка на `events.VpnStateChanged` и
+//     `events.ProxyActiveChanged` через event bus. На любое событие —
+//     trigger fetch для source'ов с `last_status="err"` (досрочный retry,
+//     не ждать heartbeat).
+//
+// Это устраняет паразитный апдейт-всех при старте (был bug — v4 поле
+// parser.last_updated удалено в v5, всегда триггерило `shouldAutoUpdate=true`).
 const (
-	autoUpdateMinInterval   = 10 * time.Minute // Minimum check interval
-	autoUpdateRetryInterval = 20 * time.Second // Interval between retry attempts
-	autoUpdateMaxRetries    = 2                // Maximum consecutive failed attempts
-	autoUpdateDefaultReload = "4h"             // Default reload interval if not specified
+	// autoUpdateHeartbeat — интервал между периодическими проверками
+	// freshness всех source'ов. 1ч — достаточно частый, чтобы reagировать
+	// на профильные `update.interval_hours` без burning сети.
+	autoUpdateHeartbeat = 1 * time.Hour
+
+	// autoUpdateRetryDelay — задержка перед единственным retry-ом для
+	// одного source после failed fetch. 15s — пользователь успеет дождаться,
+	// если ему важно; и не настолько долго, чтобы скрыть проблему.
+	autoUpdateRetryDelay = 15 * time.Second
+
+	// autoUpdateDefaultReload — fallback для source'ов без явного
+	// `update.interval_hours` и без global `defaults.reload`.
+	autoUpdateDefaultReload = 1 * time.Hour
+
+	// autoUpdateEventCooldown — минимальный интервал между fetch-попытками
+	// одного source через VPN-event handler (защита от storm'а при rapid
+	// proxy-switch / VPN on-off). Manual Refresh и heartbeat — без cooldown'а
+	// (юзер явно кликнул / редкое событие).
+	autoUpdateEventCooldown = 5 * time.Second
 )
 
-// startAutoUpdateLoop runs a background goroutine that periodically checks and updates configuration
-// Uses dynamic interval: max(10 minutes, parser.reload from config)
-// Handles errors with retries (2 attempts, 20 seconds between retries)
-// Resumes after successful manual update
+// startAutoUpdateLoop запускает периодический heartbeat + подписку на
+// VPN-event'ы. Goroutine живёт пока ac.ctx не cancelled.
 func (ac *AppController) startAutoUpdateLoop() {
-	debuglog.InfoLog("Auto-update: Starting auto-update loop")
+	debuglog.InfoLog("Auto-update: Starting per-source heartbeat loop (heartbeat=%v, retry=%v)",
+		autoUpdateHeartbeat, autoUpdateRetryDelay)
+
+	if ac.autoUpdateRetryTimers == nil {
+		ac.autoUpdateRetryTimers = make(map[string]*time.Timer)
+	}
+	if ac.autoUpdateEventLastFetch == nil {
+		ac.autoUpdateEventLastFetch = make(map[string]time.Time)
+	}
+
+	// Subscribe to VPN events — trigger immediate retry for failed source'ов.
+	if ac.EventBus != nil {
+		ac.EventBus.Subscribe(events.VpnStateChanged, func(_ events.Event) {
+			ac.triggerRetryForFailedSources("vpn-state-changed")
+		})
+		ac.EventBus.Subscribe(events.ProxyActiveChanged, func(_ events.Event) {
+			ac.triggerRetryForFailedSources("proxy-active-changed")
+		})
+	}
+
+	// Первая проверка не моментально — даём UI стартануть и пользователю
+	// увидеть текущие meta'ы; через короткую задержку запускаем initial sweep.
+	if err := ctxutil.SleepWithContext(ac.ctx, 30*time.Second); err != nil {
+		return
+	}
+	ac.runScheduledRefresh("startup")
+
+	ticker := time.NewTicker(autoUpdateHeartbeat)
+	defer ticker.Stop()
 
 	for {
-		// Check if context is cancelled
 		select {
 		case <-ac.ctx.Done():
 			debuglog.InfoLog("Auto-update: Context cancelled, stopping loop")
+			ac.cancelAllRetryTimers()
 			return
-		default:
-		}
-
-		// Check if auto-update is enabled
-		if !ac.StateService.IsAutoUpdateEnabled() {
-			if err := ctxutil.SleepWithContext(ac.ctx, 1*time.Minute); err != nil {
-				return
+		case <-ticker.C:
+			if !ac.StateService.IsAutoUpdateEnabled() {
+				debuglog.DebugLog("Auto-update: disabled by user, skipping heartbeat")
+				continue
 			}
+			if platform.IsSleeping() {
+				debuglog.DebugLog("Auto-update: system asleep, skipping heartbeat")
+				continue
+			}
+			ac.runScheduledRefresh("heartbeat")
+		}
+	}
+}
+
+// runScheduledRefresh — пробег по source'ам, fetch только устаревших.
+//
+// Trigger source: "startup" / "heartbeat" / "vpn-state-changed" /
+// "proxy-active-changed" — для логирования.
+func (ac *AppController) runScheduledRefresh(trigger string) {
+	statePath := platform.GetWizardStatePath(ac.FileService.ExecDir)
+	s, err := state.Load(statePath)
+	if err != nil {
+		debuglog.DebugLog("Auto-update[%s]: state.Load failed: %v", trigger, err)
+		return
+	}
+
+	now := time.Now().UTC()
+	stale := 0
+	skipped := 0
+	for _, src := range s.Connections.Sources {
+		if src.Type != state.SourceTypeSubscription || !src.Enabled || src.URL == "" {
 			continue
 		}
-
-		// Calculate check interval from config
-		checkInterval, err := ac.calculateAutoUpdateInterval()
-		if err != nil {
-			debuglog.WarnLog("Auto-update: Failed to calculate interval: %v, using default", err)
-			checkInterval = autoUpdateMinInterval
-		}
-
-		debuglog.DebugLog("Auto-update: Calculated interval: %v (min: %v)", checkInterval, autoUpdateMinInterval)
-
-		if platform.IsSleeping() {
-			if err := ctxutil.SleepWithContext(ac.ctx, 1*time.Minute); err != nil {
-				return
-			}
+		if !sourceIsStale(&src, s.Connections.Defaults, now) {
+			skipped++
 			continue
 		}
+		stale++
+		ac.refreshSourceWithRetry(src.ID, trigger)
+	}
+	debuglog.InfoLog("Auto-update[%s]: %d stale source(s) refreshed, %d skipped (fresh)",
+		trigger, stale, skipped)
+}
 
-		// Check if update is needed immediately (before waiting)
-		requiredInterval := checkInterval
-		needsUpdate, err := ac.shouldAutoUpdate(requiredInterval)
-		if err != nil {
-			debuglog.WarnLog("Auto-update: Failed to check if update needed: %v, skipping this check", err)
-			// Don't stop auto-update on check errors, just skip this check and wait
-		} else if needsUpdate {
-			// Update is needed - check if already in progress
-			ac.ParserMutex.Lock()
-			updateInProgress := ac.ParserRunning
-			ac.ParserMutex.Unlock()
+// sourceIsStale — true если `now - meta.last_fetched_at >= effective_reload`.
+// Source без meta или с пустым LastFetchedAt считается stale.
+func sourceIsStale(src *state.Source, defaults state.Defaults, now time.Time) bool {
+	if src.Meta == nil || src.Meta.LastFetchedAt == "" {
+		return true
+	}
+	t, err := time.Parse(time.RFC3339, src.Meta.LastFetchedAt)
+	if err != nil {
+		return true
+	}
+	effective := effectiveReload(src.Update, defaults.Reload)
+	return now.Sub(t.UTC()) >= effective
+}
 
-			if !updateInProgress {
-				debuglog.InfoLog("Auto-update: Update needed, attempting update...")
-				success := ac.attemptAutoUpdateWithRetries(autoUpdateRetryInterval, autoUpdateMaxRetries)
-				if success {
-					// Success - error counter already reset in attemptAutoUpdateWithRetries
-					ac.StateService.ResumeAutoUpdate()
-					debuglog.InfoLog("Auto-update: Resumed after successful update")
-					debuglog.InfoLog("Auto-update: Completed successfully, error counter reset")
-				} else {
-					// Failed after all retries - check if we reached max consecutive failures
-					failedAttempts := ac.StateService.GetAutoUpdateFailedAttempts()
-					if failedAttempts >= autoUpdateMaxRetries {
-						ac.StateService.SetAutoUpdateEnabled(false)
-						debuglog.WarnLog("Auto-update: Stopped after %d consecutive failed attempts", failedAttempts)
-						fyne.Do(func() {
-							if ac.hasUIWithApp() {
-								dialogs.ShowAutoHideInfo(ac.UIService.Application, ac.UIService.MainWindow, "Auto-update", "Automatic configuration update stopped after 2 failed attempts. Use manual update.")
-							}
-						})
-					}
-				}
-			} else {
-				debuglog.DebugLog("Auto-update: Update already in progress, skipping")
-			}
-		} else {
-			debuglog.DebugLog("Auto-update: Update not needed yet, will check again in %v", checkInterval)
+// effectiveReload — выбирает интервал: per-source `update.interval_hours`,
+// затем global `defaults.reload`, fallback `autoUpdateDefaultReload`.
+func effectiveReload(update *state.UpdateSpec, defaultReload string) time.Duration {
+	if update != nil && update.IntervalHours > 0 {
+		return time.Duration(update.IntervalHours) * time.Hour
+	}
+	if defaultReload != "" {
+		if d, err := time.ParseDuration(defaultReload); err == nil && d > 0 {
+			return d
 		}
+	}
+	return autoUpdateDefaultReload
+}
 
-		// Wait for check interval before next check
-		if err := ctxutil.SleepWithContext(ac.ctx, checkInterval); err != nil {
+// refreshSourceWithRetry — fetch + meta + raw для одного source.
+// На failure планирует один retry через 15 секунд.
+func (ac *AppController) refreshSourceWithRetry(sourceID, trigger string) {
+	if ac.ConfigService == nil {
+		return
+	}
+	debuglog.DebugLog("Auto-update[%s]: refreshing source %s", trigger, sourceID)
+	_, err := ac.ConfigService.RefreshSingleSubscription(sourceID)
+	if err == nil {
+		ac.cancelRetryTimer(sourceID) // на success отменяем pending retry
+		return
+	}
+	debuglog.WarnLog("Auto-update[%s]: refresh failed for %s: %v — scheduling retry in %v",
+		trigger, sourceID, err, autoUpdateRetryDelay)
+	ac.scheduleSourceRetry(sourceID)
+}
+
+// scheduleSourceRetry — таймер на 15s; повторно не рекурсирует
+// (success/fail после single retry — оба ведут к ожиданию следующего
+// heartbeat'а или VPN-event'а).
+func (ac *AppController) scheduleSourceRetry(sourceID string) {
+	ac.autoUpdateRetryMu.Lock()
+	defer ac.autoUpdateRetryMu.Unlock()
+
+	if ac.autoUpdateRetryTimers == nil {
+		ac.autoUpdateRetryTimers = make(map[string]*time.Timer)
+	}
+	// Cancel existing timer for this source if any.
+	if existing, ok := ac.autoUpdateRetryTimers[sourceID]; ok {
+		existing.Stop()
+	}
+	ac.autoUpdateRetryTimers[sourceID] = time.AfterFunc(autoUpdateRetryDelay, func() {
+		if ac.ConfigService == nil {
 			return
 		}
-	}
-}
-
-// calculateAutoUpdateInterval calculates the check interval: max(10 minutes, parser.reload)
-// Returns the interval to use for checking if update is needed
-func (ac *AppController) calculateAutoUpdateInterval() (time.Duration, error) {
-	// Read ParserConfig from file
-	config, err := parser.ExtractParserConfig(ac.FileService.ConfigPath)
-	if err != nil {
-		// If config doesn't exist or can't be read, use default
-		defaultDuration, _ := time.ParseDuration(autoUpdateDefaultReload)
-		return maxDuration(autoUpdateMinInterval, defaultDuration), nil
-	}
-
-	// Get reload value from config
-	reloadStr := config.ParserConfig.Parser.Reload
-	if reloadStr == "" {
-		// Use default if not specified
-		defaultDuration, _ := time.ParseDuration(autoUpdateDefaultReload)
-		return maxDuration(autoUpdateMinInterval, defaultDuration), nil
-	}
-
-	// Parse reload string to duration
-	reloadDuration, err := time.ParseDuration(reloadStr)
-	if err != nil {
-		debuglog.WarnLog("Auto-update: Failed to parse reload duration '%s': %v, using default", reloadStr, err)
-		defaultDuration, _ := time.ParseDuration(autoUpdateDefaultReload)
-		return maxDuration(autoUpdateMinInterval, defaultDuration), nil
-	}
-
-	// Return max(10 minutes, reload)
-	return maxDuration(autoUpdateMinInterval, reloadDuration), nil
-}
-
-// maxDuration returns the maximum of two durations
-func maxDuration(a, b time.Duration) time.Duration {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// shouldAutoUpdate checks if configuration update is needed
-// Returns true if elapsed time since last_updated >= required interval
-func (ac *AppController) shouldAutoUpdate(requiredInterval time.Duration) (bool, error) {
-	// Read ParserConfig from file
-	config, err := parser.ExtractParserConfig(ac.FileService.ConfigPath)
-	if err != nil {
-		// If config doesn't exist, update is needed
-		return true, nil
-	}
-
-	// Check last_updated
-	lastUpdatedStr := config.ParserConfig.Parser.LastUpdated
-	if lastUpdatedStr == "" {
-		// No last_updated - update is needed
-		return true, nil
-	}
-
-	// Parse last_updated timestamp
-	lastUpdated, err := time.Parse(time.RFC3339, lastUpdatedStr)
-	if err != nil {
-		debuglog.WarnLog("Auto-update: Failed to parse last_updated '%s': %v", lastUpdatedStr, err)
-		// If parsing fails, assume update is needed
-		return true, nil
-	}
-
-	// Calculate elapsed time
-	elapsed := time.Since(lastUpdated.UTC())
-	debuglog.DebugLog("Auto-update: Checking if update needed (last_updated: %s, elapsed: %v, required: %v)", lastUpdatedStr, elapsed, requiredInterval)
-
-	// Check if elapsed >= required interval
-	return elapsed >= requiredInterval, nil
-}
-
-// attemptAutoUpdateWithRetries attempts to update configuration with retries
-// Returns true if update succeeded, false if all retries failed
-func (ac *AppController) attemptAutoUpdateWithRetries(retryInterval time.Duration, maxRetries int) bool {
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		debuglog.InfoLog("Auto-update: Attempting update (attempt %d/%d)", attempt, maxRetries)
-
-		// Call UpdateConfigFromSubscriptions synchronously. The per-source
-		// result is irrelevant for the auto-update retry loop — only the
-		// error matters; toasts are not shown from this background path.
-		_, err := ac.ConfigService.UpdateConfigFromSubscriptions()
-		if err == nil {
-			// Success - reset error counter
-			ac.StateService.ResetAutoUpdateFailedAttempts()
-			return true
+		debuglog.InfoLog("Auto-update[retry-15s]: refreshing source %s", sourceID)
+		if _, err := ac.ConfigService.RefreshSingleSubscription(sourceID); err != nil {
+			debuglog.WarnLog("Auto-update[retry-15s]: source %s still failing: %v "+
+				"(next attempt at next heartbeat or VPN event)", sourceID, err)
 		}
-
-		// Error occurred - increment error counter
-		ac.StateService.IncrementAutoUpdateFailedAttempts()
-		currentAttempts := ac.StateService.GetAutoUpdateFailedAttempts()
-
-		debuglog.WarnLog("Auto-update: Failed (attempt %d/%d, total consecutive failures: %d): %v", attempt, maxRetries, currentAttempts, err)
-
-		if attempt < maxRetries {
-			debuglog.DebugLog("Auto-update: Retrying in %v...", retryInterval)
-			if err := ctxutil.SleepWithContext(ac.ctx, retryInterval); err != nil {
-				return false
-			}
-		}
-	}
-
-	// All retries failed
-	return false
+		// Cleanup map entry; не запускаем второй retry.
+		ac.autoUpdateRetryMu.Lock()
+		delete(ac.autoUpdateRetryTimers, sourceID)
+		ac.autoUpdateRetryMu.Unlock()
+	})
 }
 
-// resumeAutoUpdate resumes automatic updates after successful manual update
-// Should be called after successful UpdateConfigFromSubscriptions
+// cancelRetryTimer — отменяет pending retry для source (на success).
+func (ac *AppController) cancelRetryTimer(sourceID string) {
+	ac.autoUpdateRetryMu.Lock()
+	defer ac.autoUpdateRetryMu.Unlock()
+	if timer, ok := ac.autoUpdateRetryTimers[sourceID]; ok {
+		timer.Stop()
+		delete(ac.autoUpdateRetryTimers, sourceID)
+	}
+}
+
+// cancelAllRetryTimers — на shutdown останавливаем всё, чтобы не было
+// goroutine leak'а после ctx.Done().
+func (ac *AppController) cancelAllRetryTimers() {
+	ac.autoUpdateRetryMu.Lock()
+	defer ac.autoUpdateRetryMu.Unlock()
+	for id, timer := range ac.autoUpdateRetryTimers {
+		timer.Stop()
+		delete(ac.autoUpdateRetryTimers, id)
+	}
+}
+
+// triggerRetryForFailedSources — на VPN-event пробегаемся по source'ам с
+// `last_status="err"` и инициируем досрочный refresh.
+//
+// **Cooldown 5s per source**: rapid VPN switches / power events не должны
+// генерировать N×fetches одной и той же подписки. Если последний event-
+// triggered fetch < 5 сек назад — skip; остальные пути (manual Refresh,
+// heartbeat) cooldown не затрагивает.
+//
+// Лёгкая операция (один state.Load + map look-ups + per-source goroutine
+// внутри refreshSourceWithRetry); event handler в bus синхронный, так
+// что мы не блокируем publisher'а — RefreshSingleSubscription идёт в
+// фоне через AfterFunc'ы.
+func (ac *AppController) triggerRetryForFailedSources(trigger string) {
+	if ac.ConfigService == nil || ac.StateService == nil {
+		return
+	}
+	if !ac.StateService.IsAutoUpdateEnabled() {
+		return
+	}
+	statePath := platform.GetWizardStatePath(ac.FileService.ExecDir)
+	s, err := state.Load(statePath)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	for _, src := range s.Connections.Sources {
+		if src.Type != state.SourceTypeSubscription || !src.Enabled || src.URL == "" {
+			continue
+		}
+		if src.Meta == nil || src.Meta.LastStatus != "err" {
+			continue
+		}
+		if !ac.eventCooldownAllow(src.ID, now) {
+			debuglog.DebugLog("Auto-update[%s]: cooldown skip for source %s (<5s since last event-fetch)",
+				trigger, src.ID)
+			continue
+		}
+		// Запускаем в отдельной goroutine — event-bus handler не должен ждать сети.
+		go ac.refreshSourceWithRetry(src.ID, trigger)
+	}
+}
+
+// eventCooldownAllow возвращает true и обновляет timestamp если с
+// последнего event-triggered fetch'а данного source прошло >= 5 сек;
+// иначе false (skip).
+//
+// Использует ту же mutex что и retry timers — операции дешёвые,
+// дополнительный mutex ради них ставить избыточно.
+func (ac *AppController) eventCooldownAllow(sourceID string, now time.Time) bool {
+	ac.autoUpdateRetryMu.Lock()
+	defer ac.autoUpdateRetryMu.Unlock()
+	if ac.autoUpdateEventLastFetch == nil {
+		ac.autoUpdateEventLastFetch = make(map[string]time.Time)
+	}
+	last, ok := ac.autoUpdateEventLastFetch[sourceID]
+	if ok && now.Sub(last) < autoUpdateEventCooldown {
+		return false
+	}
+	ac.autoUpdateEventLastFetch[sourceID] = now
+	return true
+}
+
+// resumeAutoUpdate — вызывается после успешного manual Update'а; сбрасывает
+// retry timers и failed counter в StateService (legacy совместимость).
 func (ac *AppController) resumeAutoUpdate() {
 	if ac.StateService != nil {
 		ac.StateService.ResumeAutoUpdate()
-		debuglog.InfoLog("Auto-update: Resumed after successful manual update")
 	}
+	ac.cancelAllRetryTimers()
+	debuglog.InfoLog("Auto-update: Resumed after successful manual update")
 }

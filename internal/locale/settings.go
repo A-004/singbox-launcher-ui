@@ -24,14 +24,51 @@ type Settings struct {
 	// AutoPingAfterConnectDisabled — выключить автопинг нод через 5с после старта VPN.
 	// По умолчанию (отсутствует / false) — автопинг включён. Ручная «test» всегда работает.
 	AutoPingAfterConnectDisabled bool `json:"auto_ping_after_connect_disabled,omitempty"`
+	// AutoPingAfterConnectMaxProxies — soft cap: если в списке нод больше этого
+	// числа, автопинг при connect пропускается (ручная «Test» работает всегда).
+	// 0 / отсутствует — использовать встроенный дефолт (services.DefaultAutoPingMaxProxies).
+	// Положительный int — переопределить (например, 300 для мощного железа).
+	// Поле появилось после field-report на 0.8.7+: на ~500 нод авто-пинг через 5с
+	// после connect перегружал TUN-стек и подвешивал игры. См. SPEC 039 §1.3.
+	AutoPingAfterConnectMaxProxies int `json:"auto_ping_after_connect_max_proxies,omitempty"`
 	// DebugAPIEnabled — пользователь явно включил локальный HTTP debug-API
-	// (127.0.0.1:9269 по умолчанию). Off by default.
+	// (127.0.0.1:9263 по умолчанию). Off by default.
 	DebugAPIEnabled bool `json:"debug_api_enabled,omitempty"`
 	// DebugAPIToken — Bearer-токен для debug-API. Генерируется при первом
 	// включении, больше не меняется (кроме явной регенерации через UI).
 	DebugAPIToken string `json:"debug_api_token,omitempty"`
 	// DebugAPIPort — порт для debug-API; 0 / отсутствует означает DefaultPort.
 	DebugAPIPort int `json:"debug_api_port,omitempty"`
+	// LastTemplateLauncherVersion — версия лаунчера, которая в последний раз
+	// успешно скачала bin/wizard_template.json. На старте сравнивается с
+	// текущей AppVersion: если меньше → шаблон удаляется как протухший
+	// (формат шаблона мог разойтись между версиями). См. SPEC 046.
+	LastTemplateLauncherVersion string `json:"last_template_launcher_version,omitempty"`
+
+	// AutoRebuildOnChange — chain `RebuildConfigIfDirty` ПОСЛЕ любой
+	// операции, меняющей state или cache (Wizard Save, refresh
+	// subscriptions). Выключено по умолчанию: SPEC 045 требует чтобы
+	// rebuild был явным, чтобы не путать пользователя «когда у меня
+	// пересобирается config».
+	//
+	// Тоггл живёт в right-click popup'е на кнопке refresh+rebuild
+	// в Core Dashboard.
+	AutoRebuildOnChange bool `json:"auto_rebuild_on_change,omitempty"`
+}
+
+// MarkTemplateInstalled persists the launcher version that just installed the
+// template. Called after a successful template download — see SPEC 046.
+//
+// Failure to persist is non-fatal for the immediate operation but logged: if
+// the version isn't recorded the next launcher upgrade will re-invalidate the
+// template once more (cosmetic UX nuisance, not a correctness issue).
+func MarkTemplateInstalled(binDir, appVersion string) error {
+	s := LoadSettings(binDir)
+	if s.LastTemplateLauncherVersion == appVersion {
+		return nil
+	}
+	s.LastTemplateLauncherVersion = appVersion
+	return SaveSettings(binDir, s)
 }
 
 // LoadSettings reads settings from binDir/settings.json.

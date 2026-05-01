@@ -76,12 +76,18 @@ singbox-launcher/
 │   │   │   - Asset struct                          # Информация об ассете
 │   │   │   - DownloadProgress struct               # Прогресс загрузки
 │   │   │
-│   ├── core_version.go       # Работа с версиями sing-box
-│   │   │   - GetInstalledCoreVersion()             # Получение установленной версии
-│   │   │   - GetLatestCoreVersion()                 # Получение последней версии
-│   │   │   - CheckVersionInBackground()             # Проверка версии в фоне
+│   ├── core_version.go       # Версии: установленная sing-box + launcher self-update
+│   │   │   - GetInstalledCoreVersion()             # Получение установленной версии sing-box
+│   │   │   - GetLatestLauncherVersion()             # Получение последней версии лаунчера (для self-update)
+│   │   │   - CheckLauncherVersionOnStartup()        # Разовая проверка self-update при старте
 │   │   │   - CompareVersions()                      # Сравнение версий
-│   │   │   - CoreVersionInfo struct                 # Информация о версии
+│   │   │   - ShowUpdatePopupIfAvailable()           # Попап self-update
+│   │   │   # SPEC 046: версия sing-box pinned через constants.RequiredCoreVersion;
+│   │   │   # latest-походы и core-side cache удалены.
+│   │   │
+│   ├── template_migration.go  # SPEC 046: инвалидация локального шаблона на апгрейде
+│   │   │   - InvalidateTemplateIfStale()           # Удалить bin/wizard_template.json,
+│   │   │                                            #   если он установлен предыдущей версией лаунчера
 │   │   │
 │   ├── wintun_downloader.go   # Загрузка wintun.dll
 │   │   │   - DownloadWintunDLL()                     # Загрузка wintun.dll
@@ -90,11 +96,21 @@ singbox-launcher/
 │   │   │   - CreateTrayMenu()                # Создание меню трея
 │   │   │   - addHideDockMenuItem()           # Скрытие Dock (macOS)
 │   │   │
-│   ├── auto_update.go         # Автообновление конфигурации
-│   │   │   - startAutoUpdateLoop()           # Цикл автообновления
-│   │   │   - shouldAutoUpdate()              # Проверка необходимости обновления
-│   │   │   - attemptAutoUpdateWithRetries()  # Обновление с ретраями
-│   │   │   - resumeAutoUpdate()              # Возобновление автообновления
+│   ├── auto_update.go         # SPEC 052: per-source event-driven auto-update
+│   │   │   - startAutoUpdateLoop()           # 1h heartbeat по каждому источнику
+│   │   │   - effectiveReload()               # per-source interval → defaults.reload → 1h fallback
+│   │   │   - triggerRetryForFailedSources()  # immediate retry по VPN-events
+│   │   │   - eventCooldownAllow()            # 5s per-source cooldown (anti-storm)
+│   │   │   - cancelAllRetryTimers()          # Cleanup на shutdown
+│   │   │   - resumeAutoUpdate()              # Возобновление после wake
+│   │   │   # State-level lock — AppController.SubscriptionMu serializes
+│   │   │   # load→mutate→save cycles в refreshSubscriptionsMetaAndCache /
+│   │   │   # RefreshSingleSubscription. UI per-source Refresh ждёт heartbeat.
+│   │   │   #
+│   │   │   # Удалено в SPEC 052: shouldAutoUpdate (читал v4 parser.last_updated),
+│   │   │   # attemptAutoUpdateWithRetries (all-or-nothing цикл),
+│   │   │   # calculateAutoUpdateInterval. Per-source meta.last_fetched_at
+│   │   │   # — единственный источник правды о свежести.
 │   │   │
 │   ├── error_handler.go       # Обработка ошибок
 │   │   │   - showErrorUI()                   # Единый метод отображения ошибок
@@ -122,10 +138,12 @@ singbox-launcher/
 │   │   │   │
 │   │   ├── state_service.go   # Управление состоянием приложения
 │   │   │   │   - NewStateService()                  # Создание сервиса
-│   │   │   │   - GetCachedVersion()                  # Получение кешированной версии
-│   │   │   │   - SetCachedVersion()                  # Установка кешированной версии
-│   │   │   │   - IsAutoUpdateEnabled()               # Проверка автообновления
-│   │   │   │   - SetAutoUpdateEnabled()             # Установка автообновления
+│   │   │   │   - GetCachedLauncherVersion()         # Кеш версии лаунчера для self-update попапа
+│   │   │   │   - SetCachedLauncherVersion()         # Запись кеша версии лаунчера
+│   │   │   │   - IsAutoUpdateEnabled()               # Проверка автообновления подписок
+│   │   │   │   - SetAutoUpdateEnabled()             # Установка автообновления подписок
+│   │   │   │   # SPEC 046: core-version cache удалён — версия sing-box pinned
+│   │   │   │   # через constants.RequiredCoreVersion
 │   │   │   │
 │   │   └── file_service.go    # Управление файлами и путями
 │   │       │   - NewFileService()                   # Создание сервиса
@@ -607,12 +625,13 @@ singbox-launcher/
 
 **StateService** (`state_service.go`)
 - `NewStateService()` - создание сервиса
-- `GetCachedVersion()` - получение кешированной версии
-- `SetCachedVersion()` - установка кешированной версии
-- `IsAutoUpdateEnabled()` - проверка автообновления
-- `SetAutoUpdateEnabled()` - установка автообновления
+- `GetCachedLauncherVersion()` - кеш последней версии лаунчера для self-update попапа
+- `SetCachedLauncherVersion()` - запись кеша версии лаунчера
+- `IsAutoUpdateEnabled()` - проверка автообновления подписок
+- `SetAutoUpdateEnabled()` - установка автообновления подписок
 - `GetLastUpdatedTime()` - получение времени последнего обновления
 - `SetLastUpdatedTime()` - установка времени обновления
+- (SPEC 046: core-version cache `GetCachedVersion`/`SetCachedVersion` удалён — версия sing-box pinned через `constants.RequiredCoreVersion`)
 
 **FileService** (`file_service.go`)
 - `NewFileService()` - создание сервиса
@@ -970,7 +989,7 @@ singbox-launcher/
   - `LoadTemplateData()` - загрузка единого JSON-шаблона (`wizard_template.json`), парсинг секций, применение `params` по текущей платформе, фильтрация `selectable_rules` по `platforms`; условия **`params.if`** / **`params.if_or`** смотрят на bool-**`vars`**: при несовпадении **`vars[].platforms`** с текущей ОС переменная даёт **false** в условии (см. **`VarAppliesOnGOOS`** / **`ParamBoolVarTrue`** в **`ui/wizard/template/vars_resolve.go`**, **docs/CREATE_WIZARD_TEMPLATE.md**)
   - `GetTemplateFileName()` - возврат имени файла шаблона (`wizard_template.json`, единый для всех платформ)
   - Объектные **`vars[].default_value`**: **`VarDefaultValue`** / **`defaultValueKeyOrder`** в **`ui/wizard/template/vars_default.go`** (как **`platforms`**: только **`GOOS`**, плюс **`win7`** для **windows/386**, затем **`default`**), разрешение в **`vars_resolve.go`** — **docs/CREATE_WIZARD_TEMPLATE.md** / **_RU.md**
-  - `GetTemplateURL()` - возврат URL для загрузки шаблона с GitHub
+  - `GetTemplateURL()` - URL шаблона на GitHub, pinned на коммит сборки через **`constants.RequiredTemplateRef`** (CI инжектит SHA через **-ldflags**, локальные сборки берут source-default = последний `main` HEAD; см. **SPEC 046**, `docs/RELEASE_PROCESS.md §5`)
   - `UnifiedTemplate` struct - структура JSON-шаблона (`parser_config`, `config`, `selectable_rules`, `params`)
   - `UnifiedSelectableRule` struct - правило в шаблоне (label, description, default, platforms, rule_set, rule/rules)
   - `UnifiedTemplateParam` struct - платформенный параметр (name, platforms, mode, value)
@@ -1003,6 +1022,8 @@ singbox-launcher/
 │                                                              │
 │  1. main() [main.go]                                         │
 │     └─> Создание AppController                               │
+│     └─> InvalidateTemplateIfStale (SPEC 046)                 │
+│     └─> LoadSettings + LoadExternalLocales                   │
 │     └─> Инициализация UI                                     │
 │     └─> Запуск приложения                                    │
 │                                                              │
@@ -1435,6 +1456,97 @@ main.go
 2. Реализовать функцию создания вкладки
 3. Добавить в `wizard.go` в список шагов
 4. Обновить навигацию между шагами
+
+## SPEC 052 — Connections redesign (state.json v5)
+
+После реализации SPEC 052 формат **state.json** перешёл на v5 layout с
+top-level контейнерами `meta` и `connections`. Wizard и runtime читают и пишут
+этот формат через единый core/state слой.
+
+### Ключевые изменения
+
+- **state.json v5** — top-level `meta` (version, timestamps, comment) +
+  `connections` (sources, outbounds, defaults). Старые v2-v4 файлы
+  автоматически мигрируются при первом Load. Подробности —
+  `SPECS/052-F-C-CONNECTIONS_REDESIGN/SPEC.md`.
+
+- **`core/state/v5/`** — pure-data типы и migration v4 → v5:
+  - `Source` (subscription / server) с дискриминатором по `Type`;
+  - `SubscriptionMeta` — runtime-данные подписки (profile_title, userinfo,
+    fetch history, preview);
+  - `MakeULID` — собственная имплементация Crockford-base32 для Source.ID;
+  - `MigrateV4ToV5` — pure-функция, deterministic при заданном `IDGenerator`;
+  - `WriteRawBody` / `ReadRawBody` / `DeleteOrphans` — atomic I/O для
+    `bin/subscriptions/<id>.raw` (raw body cache).
+
+- **`bin/subscriptions/<id>.raw`** — per-source raw body cache. Update
+  пишет atomic'но при успешном fetch; при failed fetch старый файл
+  не перезаписывается (per-source resilience). Lazy GC orphan-файлов
+  при следующем Update.
+
+- **`bin/outbounds.cache.json`** — удалён. Rebuild парсит `.raw`
+  напрямую (`buildSnapshotFromRawCache` в `core/rebuild_raw_cache.go`).
+  Legacy файл удаляется one-shot при первом Rebuild после миграции.
+
+- **`subscription.LookupCachedBody`** — package-level hook,
+  позволяющий вызывающему слою (Update, Rebuild) подать pre-fetched body
+  без network call'а. Update устанавливает hook после `refreshSubscriptionsMetaAndCache`,
+  чтобы парсер не делал double-fetch. Rebuild ставит hook на чтение `.raw` с диска.
+
+- **`subscription.FetchSubscriptionWithMeta`** — расширенный fetcher,
+  возвращает `FetchResult` с raw body, decoded body и распарсенными
+  header-derived полями (`ParseHeaders` + `ParseInlineComments` + `MergeMeta`).
+  Поддерживает headers контракт LxBox: `subscription-userinfo`,
+  `profile-title`, `profile-update-interval`, `support-url`, `profile-web-page-url`,
+  `content-disposition`.
+
+- **`ConfigService.RefreshSingleSubscription(sourceID)`** — per-source
+  manual refresh; используется кнопкой «Refresh» в UI визарда per-row.
+  Не запускает Rebuild — только обновляет .raw + meta для одного source.
+
+- **Wizard StateStore** теперь — тонкий wrapper вокруг `corestate.Save`/`Load`.
+  `WizardStateFile`, `PersistedCustomRule`, `PersistedSettingVar` и др. —
+  алиасы на `core/state` типы; кастомный JSON-маршалинг wizard'а удалён.
+
+- **UI source rows** показывают per-source метаданные (для подписок):
+  тип индикатор (📡 / 🔌), profile_title, last_status badge (●ok / ●err),
+  кнопка per-source Refresh. Tooltip строки содержит quota usage,
+  expire date, last_fetched, error count.
+
+### Поток обновления подписки (SPEC 052 phase 5-7)
+
+```
+User → Configurator → Save
+   ↓
+state.json (v5: connections.sources[i] с пустой Meta)
+   ↓
+User → Refresh button (one source) или Update (all)
+   ↓
+core.ConfigService.RefreshSingleSubscription(id) / refreshSubscriptionsMetaAndCache
+   ↓
+FetchSubscriptionWithMeta:
+  - HTTP GET → raw body
+  - ParseHeaders + ParseInlineComments → SubscriptionMeta
+  - DecodeSubscriptionContent → decoded payload
+   ↓
+WriteRawBody(<id>.raw) atomic
+   ↓
+state.connections.sources[i].Meta = {
+  ProfileTitle, UserInfo, LastStatus, LastFetchedAt, ErrorCount, ...
+  PreviewNodes (first 50), NodesCountFetched, Truncated
+}
+   ↓
+state.Save (atomic .tmp + Rename)
+   ↓
+User → Rebuild
+   ↓
+buildSnapshotFromRawCache (без network):
+  - Reads bin/subscriptions/*.raw
+  - LookupCachedBody hook → parser uses cached body
+  - GenerateOutboundsFromParserConfig → in-memory Snapshot
+   ↓
+BuildConfig → atomic write config.json
+```
 
 ## Заключение
 

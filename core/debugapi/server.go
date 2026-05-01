@@ -33,9 +33,10 @@ import (
 	"singbox-launcher/internal/debuglog"
 )
 
-// DefaultPort matches LxBox spec 031 so scripts already written against
-// mobile work unchanged when pointed at the desktop.
-const DefaultPort = 9269
+// DefaultPort — desktop debug-API default. Mobile LxBox uses 9269; we
+// chose a separate port so a single host can run both in parallel
+// without `lsof: address in use`.
+const DefaultPort = 9263
 
 // ControllerFacade is the narrow surface the debug-api needs from the
 // singleton AppController. Declared here (not in core) to keep debugapi
@@ -49,6 +50,9 @@ type ControllerFacade interface {
 	GetConfigPath() string
 	GetLastUpdateSucceededAt() time.Time
 	GetLauncherVersion() string
+	// GetExecDir — used by /debug/snapshot to resolve canonical wizard
+	// file paths via internal/platform helpers (SUB_SPEC_SNAPSHOT.md §2.2).
+	GetExecDir() string
 
 	// Actions — may be no-ops if the facade doesn't want to expose them.
 	StartSingBox() error
@@ -58,6 +62,14 @@ type ControllerFacade interface {
 	// "test" button. Returns after the sweep completes (may be slow with
 	// many nodes — callers should expect seconds).
 	PingAllProxies() error
+	// RebuildConfigIfDirty — re-emit config.json from current state +
+	// outbounds cache + template, without restarting sing-box (SPEC 045
+	// invariant: same call as the pre-Start hook in ProcessService).
+	// No-op if dirty markers are clean. Useful for scripts/agents that
+	// want config to reflect state changes without disturbing the running
+	// sing-box process. The file write is atomic; on error nothing is
+	// committed.
+	RebuildConfigIfDirty() error
 }
 
 // Server owns the listener, shutdown context, and auth config.
@@ -147,10 +159,12 @@ func (s *Server) routes() http.Handler {
 	protected.HandleFunc("/version", s.handleVersion)
 	protected.HandleFunc("/state", s.handleState)
 	protected.HandleFunc("/proxies", s.handleProxies)
+	protected.HandleFunc("/debug/snapshot", s.handleSnapshot)
 	protected.HandleFunc("/action/update-subs", s.handleUpdateSubs)
 	protected.HandleFunc("/action/start", s.handleStart)
 	protected.HandleFunc("/action/stop", s.handleStop)
 	protected.HandleFunc("/action/ping-all", s.handlePingAll)
+	protected.HandleFunc("/action/rebuild-config", s.handleRebuildConfig)
 
 	mux.Handle("/", s.authMiddleware(protected))
 	return mux
@@ -220,6 +234,30 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.facade.StartSingBox(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleRebuildConfig — POST /action/rebuild-config
+//
+// Дёргает RebuildConfigIfDirty в обход restart sing-box: пересобирает
+// config.json из current state + outbounds cache + template, если
+// CacheStale или ConfigStale взведён. Если оба чистые — no-op (200 OK,
+// `{"ok":true,"rebuilt":false}`); иначе пересборка + 200 OK с
+// `{"ok":true,"rebuilt":true}`. Атомарная запись через .tmp + Rename.
+//
+// Useful for scripts/agents которые хотят увидеть новый config.json на
+// диске, не дёргая running sing-box. После rebuild маркеры дырти
+// сбрасываются (как и в обычном pre-Start path), чтобы UI знал что
+// state и config теперь согласованы.
+func (s *Server) handleRebuildConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "POST required"})
+		return
+	}
+	if err := s.facade.RebuildConfigIfDirty(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
