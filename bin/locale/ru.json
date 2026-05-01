@@ -22,6 +22,7 @@
   "core.status_config_not_found": "%s ❌ не найден",
   "core.status_config_error": "Ошибка конфига: %v",
   "core.status_parser_starting": "Запуск...",
+  "core.toast_refreshing_subs": "Обновление подписок",
   "core.button_update": "🔄 Обновить",
   "core.button_update_tooltip": "Обновить подписки (%s+U)",
   "core.button_restart_tooltip": "Перезапустить sing-box (%s+R)",

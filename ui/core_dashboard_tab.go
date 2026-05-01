@@ -65,25 +65,16 @@ type CoreDashboardTab struct {
 	parserProgressBar         *widget.ProgressBar // Progress bar for parser
 	parserStatusLabel         *widget.Label       // Status label for parser
 
-	// Subscription operation panel — under Exit button. Streams log
-	// messages while Update runs, ends with a coloured toast (✓/✗ + ×)
-	// that auto-hides after subsToastTTL.
-	subsLogBox    *fyne.Container // VBox of log lines (Update progress)
-	subsLogScroll *container.Scroll
-	subsToastBox  *fyne.Container // current final-status toast (or empty)
-	subsToastTimer *time.Timer    // auto-hide timer for final toast
+	// Subscription operation panel — single in-place toast under Exit
+	// button. Updates as progress changes; final state (✓/✗ + ×) auto-hides
+	// after subsToastTTL.
+	subsToastBox   *fyne.Container
+	subsToastTimer *time.Timer
 
 	// Data
 	downloadInProgress       bool // Flag for sing-box download process
 	wintunDownloadInProgress bool // Flag for wintun.dll download process
 }
-
-// subsToastTTL — сколько финальный тост висит до автоскрытия (или до клика на ×).
-const subsToastTTL = 20 * time.Second
-
-// subsLogMaxLines — лимит видимых строк лога; чтобы long-runner subscription
-// не разнёс окно. Старые строки отбрасываются (FIFO).
-const subsLogMaxLines = 12
 
 // CreateCoreDashboardTab creates and returns the Core Dashboard tab
 // formatRelativeAge renders a short "subs updated Xm ago" hint.
@@ -167,51 +158,32 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 		})
 	}
 
-	// Регистрируем callback для обновления прогресса парсера
+	// Регистрируем callback для обновления прогресса парсера. Поток:
+	// единственный in-place toast в subs-status панели обновляется по
+	// каждому progress callback'у — title "Refreshing subscriptions",
+	// subtitle = текущий status, progress bar = текущий %.
 	tab.controller.UIService.UpdateParserProgressFunc = func(progress float64, status string) {
 		fyne.Do(func() {
 			if tab.parserProgressBar == nil {
 				return
 			}
-			// Stream status в subs-log панель под Exit (SPEC 052 phase 8 polish).
-			if status != "" {
-				tab.appendSubsLogLine(status)
-			}
 			if progress < 0 {
-				// Error state — hide progress bar, log сохраняется до показа toast'а.
+				// Error state — финальный toast будет показан через ShowSubsResultFunc.
 				tab.parserProgressBar.Hide()
-				tab.parserStatusLabel.Hide()
 				tab.updateConfigInfo()
 				return
 			}
-			tab.parserProgressBar.Show()
-			tab.parserStatusLabel.Show()
 			tab.parserProgressBar.SetValue(progress / 100.0)
-			tab.parserStatusLabel.SetText(status)
-			if progress >= 100 {
-				go func() {
-					<-time.After(1 * time.Second)
-					fyne.Do(func() {
-						tab.parserProgressBar.Hide()
-						tab.parserStatusLabel.Hide()
-						tab.updateConfigInfo()
-					})
-				}()
-			}
+			tab.setSubsToastInProgress(locale.T("core.toast_refreshing_subs"), status)
 		})
 	}
 
-	// Финальный тост от RunParserProcess (success/error).
+	// Финальный тост от RunParserProcess (success/error). Заменяет
+	// in-progress toast зелёной ✓ / красной ✗ карточкой (auto-hide 20s).
 	tab.controller.UIService.ShowSubsResultFunc = func(success bool, message string) {
 		fyne.Do(func() {
-			tab.showSubsToast(message, success)
-			// После показа тоста чистим лог через 1 сек чтобы он не перекрывал.
-			go func() {
-				<-time.After(1 * time.Second)
-				fyne.Do(func() {
-					tab.clearSubsLog()
-				})
-			}()
+			tab.setSubsToastResult(message, success)
+			tab.updateConfigInfo()
 		})
 	}
 

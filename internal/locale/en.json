@@ -22,6 +22,7 @@
   "core.status_config_not_found": "%s ❌ not found",
   "core.status_config_error": "Config error: %v",
   "core.status_parser_starting": "Starting...",
+  "core.toast_refreshing_subs": "Refreshing subscriptions",
   "core.button_update": "🔄 Update",
   "core.button_update_tooltip": "Update subscriptions (%s+U)",
   "core.button_restart_tooltip": "Restart sing-box (%s+R)",

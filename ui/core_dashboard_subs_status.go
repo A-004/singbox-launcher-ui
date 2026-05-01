@@ -1,17 +1,17 @@
 // SPEC 052 phase 8 polish — subscription operation status panel.
 //
-// Раньше Update показывал toast через `dialogs.ShowAutoHideInfo`
-// (отдельный popup-window). Теперь весь поток статусов от Update'а идёт
-// in-place под кнопкой Exit на Core dashboard:
+// Один in-place toast под Exit-кнопкой, updating in place на каждом
+// progress callback'е. Никакого scrollable-лога — пользователь видит
+// текущее состояние и финальный результат в одной карточке.
 //
-//   - Promise log: streaming-строки от UpdateParserProgressFunc, latest
-//     внизу. Скролл если перерос.
-//   - Final toast: green ✓ / red ✗ карточка с close-X и текстом результата;
-//     auto-hide через 20 секунд (см. subsToastTTL).
+// Layout: [icon]  Title         [×]
+//                 Subtitle (опционально)
+//                 [progress bar при активной операции]
 //
-// Почему не popup: на каждый Update / Per-source Refresh / 1ч heartbeat
-// открывать modal — раздражает; in-place panel discoverable и не воркует
-// с user flow.
+// Состояния:
+//   - inProgress: нейтральная иконка ⋯, без × кнопки, прогрессбар активен
+//   - success:    зелёная ✓, × кнопка, без прогрессбара, auto-hide 20s
+//   - error:      красная ✗, × кнопка, без прогрессбара, auto-hide 20s
 package ui
 
 import (
@@ -25,108 +25,83 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// createSubsStatusBlock — VBox под Exit кнопкой:
-//
-//   1. Progress bar + current-status label (active во время операции)
-//   2. Лог стрима (по строке на каждый status callback)
-//   3. Финальный тост (✓/✗ + ×, auto-hide 20s)
-//
-// На старте все три секции пустые (collapsed); появляются по мере операций.
-func (tab *CoreDashboardTab) createSubsStatusBlock() fyne.CanvasObject {
-	tab.subsLogBox = container.NewVBox()
-	tab.subsLogScroll = container.NewVScroll(tab.subsLogBox)
-	tab.subsLogScroll.SetMinSize(fyne.NewSize(0, 0))
-	tab.subsLogScroll.Hide()
+// subsToastTTL — сколько финальный (success/error) тост висит до
+// автоскрытия (или до клика на ×). Промежуточный (in-progress) toast
+// не имеет TTL — он живёт до перехода в final state.
+const subsToastTTL = 20 * time.Second
 
+// createSubsStatusBlock — пустой контейнер под Exit для будущих тостов.
+// На старте скрыт; появляется при первом вызове setSubsToastInProgress.
+func (tab *CoreDashboardTab) createSubsStatusBlock() fyne.CanvasObject {
 	tab.subsToastBox = container.NewMax()
 	tab.subsToastBox.Hide()
-
-	progressBlock := container.NewVBox(
-		tab.parserProgressBar,
-		tab.parserStatusLabel,
-	)
-
-	return container.NewVBox(
-		progressBlock,
-		tab.subsLogScroll,
-		tab.subsToastBox,
-	)
+	return tab.subsToastBox
 }
 
-// appendSubsLogLine — добавить строку в лог; latest внизу; clamped до
-// subsLogMaxLines (FIFO drop старых). Должна вызываться из main thread
-// (через fyne.Do в callback'ах).
-func (tab *CoreDashboardTab) appendSubsLogLine(message string) {
-	if tab.subsLogBox == nil {
-		return
-	}
-	if message == "" {
-		return
-	}
-	line := widget.NewLabel(message)
-	line.Importance = widget.LowImportance
-	line.Wrapping = fyne.TextWrapWord
-	tab.subsLogBox.Add(line)
-
-	// Clamp old lines.
-	if n := len(tab.subsLogBox.Objects); n > subsLogMaxLines {
-		tab.subsLogBox.Objects = tab.subsLogBox.Objects[n-subsLogMaxLines:]
-	}
-
-	// Auto-show + scroll-to-bottom.
-	if !tab.subsLogScroll.Visible() {
-		tab.subsLogScroll.Show()
-	}
-	// Adapt min height до 6 строк (capped).
-	height := float32(len(tab.subsLogBox.Objects)) * 22
-	if height > 140 {
-		height = 140
-	}
-	tab.subsLogScroll.SetMinSize(fyne.NewSize(0, height))
-	tab.subsLogScroll.Refresh()
-	tab.subsLogScroll.ScrollToBottom()
-}
-
-// clearSubsLog — скрыть и обнулить лог-секцию (вызывается перед стартом
-// новой операции, чтобы не накапливать).
-func (tab *CoreDashboardTab) clearSubsLog() {
-	if tab.subsLogBox == nil {
-		return
-	}
-	tab.subsLogBox.Objects = nil
-	tab.subsLogBox.Refresh()
-	tab.subsLogScroll.Hide()
-	tab.subsLogScroll.SetMinSize(fyne.NewSize(0, 0))
-}
-
-// showSubsToast — показать финальный статус: success=true → green ✓,
-// success=false → red ✗. Кнопка × закрывает немедленно. Auto-hide через
-// subsToastTTL (20 сек).
-//
-// Если предыдущий тост ещё на экране — заменяем (предыдущий timer
-// отменяется).
-func (tab *CoreDashboardTab) showSubsToast(message string, success bool) {
+// setSubsToastInProgress — карточка статуса для активной операции.
+// title — основная строка (например, "Refreshing subscriptions").
+// subtitle — детали (например, "Fetching 3/5: https://..."). Может быть пустым.
+func (tab *CoreDashboardTab) setSubsToastInProgress(title, subtitle string) {
 	if tab.subsToastBox == nil {
 		return
 	}
-	// Cancel previous timer.
 	if tab.subsToastTimer != nil {
 		tab.subsToastTimer.Stop()
 		tab.subsToastTimer = nil
 	}
 
-	// Цветной только icon (зелёная ✓ / красный ✗); фон — нейтральный.
-	var coloredIcon fyne.CanvasObject
+	// Нейтральная иконка ⋯ (waiting).
+	icon := canvas.NewText("⋯", color.NRGBA{R: 100, G: 140, B: 220, A: 255})
+	icon.TextSize = 22
+	icon.TextStyle = fyne.TextStyle{Bold: true}
+
+	titleLabel := widget.NewLabel(title)
+	titleLabel.TextStyle = fyne.TextStyle{Bold: true}
+	titleLabel.Wrapping = fyne.TextWrapWord
+
+	textCol := container.NewVBox(titleLabel)
+	if subtitle != "" {
+		subLabel := widget.NewLabel(subtitle)
+		subLabel.Importance = widget.LowImportance
+		subLabel.Wrapping = fyne.TextWrapWord
+		textCol.Add(subLabel)
+	}
+	if tab.parserProgressBar != nil {
+		// Re-attach: progress bar live в этом toast'е.
+		tab.parserProgressBar.Show()
+		textCol.Add(tab.parserProgressBar)
+	}
+
+	body := container.NewBorder(nil, nil, container.NewPadded(icon), nil, textCol)
+	padded := container.NewPadded(body)
+
+	tab.subsToastBox.Objects = []fyne.CanvasObject{padded}
+	tab.subsToastBox.Show()
+	tab.subsToastBox.Refresh()
+}
+
+// setSubsToastResult — финальный статус: success → зелёная ✓, иначе
+// красная ✗. Кнопка × закрывает немедленно. Auto-hide через subsToastTTL.
+func (tab *CoreDashboardTab) setSubsToastResult(message string, success bool) {
+	if tab.subsToastBox == nil {
+		return
+	}
+	if tab.subsToastTimer != nil {
+		tab.subsToastTimer.Stop()
+		tab.subsToastTimer = nil
+	}
+
+	var icon fyne.CanvasObject
 	if success {
 		t := canvas.NewText("✓", color.NRGBA{R: 60, G: 200, B: 80, A: 255})
-		t.TextSize = 20
+		t.TextSize = 22
 		t.TextStyle = fyne.TextStyle{Bold: true}
-		coloredIcon = t
+		icon = t
 	} else {
 		t := canvas.NewText("✗", color.NRGBA{R: 220, G: 70, B: 70, A: 255})
-		t.TextSize = 20
+		t.TextSize = 22
 		t.TextStyle = fyne.TextStyle{Bold: true}
-		coloredIcon = t
+		icon = t
 	}
 
 	msg := widget.NewLabel(message)
@@ -137,22 +112,24 @@ func (tab *CoreDashboardTab) showSubsToast(message string, success bool) {
 	})
 	closeBtn.Importance = widget.LowImportance
 
-	body := container.NewBorder(nil, nil, coloredIcon, closeBtn, msg)
+	// Прячем progress bar — финальное состояние не нуждается в нём.
+	if tab.parserProgressBar != nil {
+		tab.parserProgressBar.Hide()
+	}
+
+	body := container.NewBorder(nil, nil, container.NewPadded(icon), closeBtn, msg)
 	padded := container.NewPadded(body)
 
 	tab.subsToastBox.Objects = []fyne.CanvasObject{padded}
 	tab.subsToastBox.Show()
 	tab.subsToastBox.Refresh()
 
-	// Auto-hide after TTL.
 	tab.subsToastTimer = time.AfterFunc(subsToastTTL, func() {
-		fyne.Do(func() {
-			tab.hideSubsToast()
-		})
+		fyne.Do(func() { tab.hideSubsToast() })
 	})
 }
 
-// hideSubsToast — закрывает финальный тост (×-клик или auto-hide TTL).
+// hideSubsToast — закрывает toast (×-клик или auto-hide TTL).
 func (tab *CoreDashboardTab) hideSubsToast() {
 	if tab.subsToastBox == nil {
 		return
