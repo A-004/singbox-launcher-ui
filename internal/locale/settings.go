@@ -44,16 +44,6 @@ type Settings struct {
 	// текущей AppVersion: если меньше → шаблон удаляется как протухший
 	// (формат шаблона мог разойтись между версиями). См. SPEC 046.
 	LastTemplateLauncherVersion string `json:"last_template_launcher_version,omitempty"`
-
-	// AutoRebuildOnChange — chain `RebuildConfigIfDirty` ПОСЛЕ любой
-	// операции, меняющей state или cache (Wizard Save, refresh
-	// subscriptions). Выключено по умолчанию: SPEC 045 требует чтобы
-	// rebuild был явным, чтобы не путать пользователя «когда у меня
-	// пересобирается config».
-	//
-	// Тоггл живёт в right-click popup'е на кнопке refresh+rebuild
-	// в Core Dashboard.
-	AutoRebuildOnChange bool `json:"auto_rebuild_on_change,omitempty"`
 }
 
 // MarkTemplateInstalled persists the launcher version that just installed the

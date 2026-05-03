@@ -26,7 +26,6 @@ import (
 	"singbox-launcher/internal/constants"
 	"singbox-launcher/internal/debuglog"
 	"singbox-launcher/internal/dialogs"
-	"singbox-launcher/internal/fynewidget"
 	"singbox-launcher/internal/locale"
 	"singbox-launcher/internal/platform"
 	"singbox-launcher/ui/configurator"
@@ -61,7 +60,6 @@ type CoreDashboardTab struct {
 	wizardButton              *widget.Button
 	stateSelect               *widget.Select // dropdown of saved named states (bottom row)
 	updateConfigButton        *ttwidget.Button // icon-only refresh-subs button (tooltip carries shortcut hint)
-	updateAndRebuildButton    *ttwidget.Button // icon-only refresh+rebuild combo (right-click → autoRebuild toggle)
 	parserProgressBar         *widget.ProgressBar // Progress bar for parser
 	parserStatusLabel         *widget.Label       // Status label for parser
 
@@ -377,20 +375,6 @@ func (tab *CoreDashboardTab) createConfigBlock() fyne.CanvasObject {
 		go core.RunParserProcess()
 	}
 
-	doRefreshAndRebuild := func() {
-		startProgress()
-		go func() {
-			core.RunParserProcess()
-			ac := core.GetController()
-			if ac == nil {
-				return
-			}
-			if err := ac.RebuildConfigIfDirty(); err != nil {
-				debuglog.WarnLog("CoreDashboard: refresh+rebuild: rebuild step failed: %v", err)
-			}
-		}()
-	}
-
 	tab.updateConfigButton = ttwidget.NewButtonWithIcon("", theme.ViewRefreshIcon(), doRefreshOnly)
 	tab.updateConfigButton.Importance = widget.MediumImportance
 	tab.updateConfigButton.SetToolTip(fmt.Sprintf(locale.T("core.button_update_tooltip"), platform.ShortcutModifierLabel()))
@@ -419,41 +403,16 @@ func (tab *CoreDashboardTab) createConfigBlock() fyne.CanvasObject {
 		tab.configStatusLabel,
 	)
 
-	// Update + Rebuild combo — отдельная icon-only кнопка справа от Update.
-	// Левый клик: refresh subscriptions ПЛЮС rebuild config (chain).
-	// Правый клик (через SecondaryTapWrap): popup-меню с check-item
-	// «Auto rebuild on change» — если включён, любое успешное Update
-	// (а также Configurator Save) автоматически триггерит Rebuild.
-	tab.updateAndRebuildButton = ttwidget.NewButtonWithIcon("", theme.MediaReplayIcon(), doRefreshAndRebuild)
-	tab.updateAndRebuildButton.Importance = widget.MediumImportance
-	tab.updateAndRebuildButton.SetToolTip(locale.T("core.button_update_rebuild_tooltip"))
+	// SPEC 045 фаза 9: убрана отдельная Refresh+Rebuild кнопка. Теперь
+	// сама Update (refresh subscriptions) автоматически делает Rebuild
+	// в конце (см. UpdateConfigFromSubscriptions). Дублирующая комбо-кнопка
+	// больше ничего не добавляет.
 
-	binDirForSettings := platform.GetBinDir(tab.controller.FileService.ExecDir)
-	updateAndRebuildWrap := fynewidget.NewSecondaryTapWrap(tab.updateAndRebuildButton)
-	updateAndRebuildWrap.OnSecondary = func(pe *fyne.PointEvent) {
-		if tab.controller == nil || tab.controller.UIService == nil || tab.controller.UIService.MainWindow == nil {
-			return
-		}
-		st := locale.LoadSettings(binDirForSettings)
-		toggleItem := fyne.NewMenuItem(locale.T("core.update_autorebuild_label"), func() {
-			cur := locale.LoadSettings(binDirForSettings)
-			cur.AutoRebuildOnChange = !cur.AutoRebuildOnChange
-			if err := locale.SaveSettings(binDirForSettings, cur); err != nil {
-				debuglog.WarnLog("CoreDashboard: save AutoRebuildOnChange: %v", err)
-			}
-		})
-		toggleItem.Checked = st.AutoRebuildOnChange
-		menu := fyne.NewMenu("", toggleItem)
-		pop := widget.NewPopUpMenu(menu, tab.controller.UIService.MainWindow.Canvas())
-		pop.ShowAtPosition(pe.AbsolutePosition)
-	}
-
-	// Кнопки под статусом (по центру). Cmd/Ctrl+U shortcut → refresh-only.
+	// Кнопки под статусом (по центру). Cmd/Ctrl+U shortcut → Update (с авто-rebuild).
 	buttonsRow := container.NewCenter(
 		container.NewHBox(
 			tab.wizardButton,
 			tab.updateConfigButton,
-			updateAndRebuildWrap,
 			tab.templateDownloadButton,
 		),
 	)

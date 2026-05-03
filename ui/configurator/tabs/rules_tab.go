@@ -534,15 +534,21 @@ func createCustomRuleSRSButton(
 	}
 	btn.OnTapped = func() {
 		runSRSDownloadAsync(presenter, model, guiState, srsEntries, btn.TTWidget(), outboundSelect, func() {
+			// State не мутируется на download — kept declarative (type:remote,
+			// url). Build pipeline (core/build/route_merge.go) при эмите в
+			// config.json сам переписывает remote→local при наличии файла.
+			// Download — это операция кеша на диске, не должна неявно
+			// дёргать dirty marker.
 			if *enableRuleOnSRSSuccess {
 				*enableRuleOnSRSSuccess = false
 				guiState.UpdatingOutboundOptions = true
 				model.CustomRules[idx].Enabled = true
 				checkbox.SetChecked(true)
 				guiState.UpdatingOutboundOptions = false
+				// Enable rule — это уже user action на dirty.
+				model.TemplatePreviewNeedsUpdate = true
+				presenter.MarkAsChanged()
 			}
-			model.TemplatePreviewNeedsUpdate = true
-			presenter.MarkAsChanged()
 		})
 	}
 	return btn
