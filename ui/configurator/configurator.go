@@ -615,6 +615,14 @@ func handleSaveAsButton(presenter *wizardpresentation.WizardPresenter, wizardWin
 }
 
 // handleCloseButton обрабатывает закрытие визарда с проверкой изменений.
+//
+// Rebuild дёргается ТОЛЬКО на путях где есть успешный Save:
+//   - In-wizard Save button → executeSaveOperation → auto-rebuild (см. presenter_save.go)
+//   - Close dialog → Save → SaveCurrentState + rebuild
+//
+// Close без save (Discard / no-changes / SaveInProgress→Cancel) rebuild
+// НЕ дёргает: state.json не менялся, config актуален относительно последнего
+// сохранённого state'а. Если до этого был Save — rebuild уже сработал тогда.
 func handleCloseButton(presenter *wizardpresentation.WizardPresenter, guiState *wizardpresentation.GUIState, wizardWindow fyne.Window) {
 	debuglog.InfoLog("handleCloseButton: called")
 
@@ -642,11 +650,23 @@ func handleCloseButton(presenter *wizardpresentation.WizardPresenter, guiState *
 			if d != nil {
 				d.Hide()
 			}
-			// Save to state.json
+			// Save to state.json + rebuild — тот же flow что и in-wizard
+			// Save кнопка (presenter.SaveConfig). Здесь короткий путь
+			// SaveCurrentState (без progress UI, окно всё равно закрывается)
+			// + явный rebuild в фоне.
 			if err := presenter.SaveCurrentState(); err != nil {
 				dialogs.ShowError(wizardWindow, fmt.Errorf("%s: %w", locale.T("wizard.error_save_state"), err))
 				return
 			}
+			go func() {
+				ac := core.GetController()
+				if ac == nil {
+					return
+				}
+				if err := ac.RebuildConfigIfDirty(); err != nil {
+					debuglog.WarnLog("Close→Save: auto-rebuild failed: %v", err)
+				}
+			}()
 			wizardWindow.Close()
 		})
 		saveButton.Importance = widget.HighImportance
@@ -655,6 +675,7 @@ func handleCloseButton(presenter *wizardpresentation.WizardPresenter, guiState *
 			if d != nil {
 				d.Hide()
 			}
+			// Discard — несохранённые правки выкидываются, rebuild не нужен.
 			wizardWindow.Close()
 		})
 		discardButton.Importance = widget.MediumImportance
@@ -669,7 +690,9 @@ func handleCloseButton(presenter *wizardpresentation.WizardPresenter, guiState *
 		d = dialogs.NewCustom(locale.T("wizard.dialog_confirmation"), messageLabel, buttonsRow, locale.T("wizard.dialog_cancel"), wizardWindow)
 		d.Show()
 	} else {
-		// Нет изменений - закрываем без диалога
+		// Нет несохранённых правок — state на диске актуален. Если был Save
+		// раньше в этом сеансе — rebuild уже сработал тогда. Закрываем без
+		// дополнительных действий.
 		wizardWindow.Close()
 	}
 }

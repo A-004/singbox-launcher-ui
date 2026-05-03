@@ -21,7 +21,6 @@ import (
 	"singbox-launcher/core/template"
 	"singbox-launcher/internal/debuglog"
 	"singbox-launcher/internal/dialogs"
-	"singbox-launcher/internal/locale"
 	"singbox-launcher/internal/platform"
 )
 
@@ -68,26 +67,22 @@ func (svc *ConfigService) RunParserProcess() {
 	}()
 
 	// Call internal parser to update configuration
-	result, err := svc.UpdateConfigFromSubscriptions()
+	_, err := svc.UpdateConfigFromSubscriptions()
 
-	// Обрабатываем результат — финальный статус идёт в новый
-	// in-place toast под Exit'ом (SPEC 052 phase 8 polish), а не popup.
+	// SPEC 045 фаза 9: финальный success-toast эмитит сам
+	// UpdateConfigFromSubscriptions (после rebuild). Здесь обрабатываем
+	// только ошибку — fallback popup для случая когда новый callback не
+	// зарегистрирован.
 	if err != nil {
 		debuglog.ErrorLog("RunParser: subscriptions refresh failed: %v", err)
 		if ac.UIService != nil && ac.UIService.ShowSubsResultFunc != nil {
 			ac.UIService.ShowSubsResultFunc(false, err.Error())
 		} else {
-			// Fallback: legacy popup (если новый callback не зарегистрирован).
 			ac.ShowParserError(fmt.Errorf("refresh subscriptions: %w", err))
 		}
 		return
 	}
-	debuglog.InfoLog("RunParser: cache refreshed; config.json will be rebuilt on next Restart/Rebuild")
-	if ac.UIService != nil && ac.UIService.ShowSubsResultFunc != nil {
-		ac.UIService.ShowSubsResultFunc(true, parserSuccessToastMessage(result))
-	} else if ac.UIService != nil && ac.UIService.Application != nil && ac.UIService.MainWindow != nil {
-		dialogs.ShowAutoHideInfo(ac.UIService.Application, ac.UIService.MainWindow, "Subscriptions", parserSuccessToastMessage(result))
-	}
+	debuglog.InfoLog("RunParser: cache refreshed; config.json rebuilt by UpdateConfigFromSubscriptions")
 }
 
 // parserSuccessToastMessage formats the toast shown after a successful
@@ -241,14 +236,25 @@ func (svc *ConfigService) UpdateConfigFromSubscriptions() (*config.OutboundGener
 		}
 	}
 
-	// AutoRebuildOnChange — если пользователь включил тоггл (right-click
-	// на кнопке refresh+rebuild на дашборде), сразу пересобираем config
-	// чтобы он не отставал от свежего cache. Best-effort: ошибка rebuild'а
-	// не отменяет успех Update'а.
-	binDir := platform.GetBinDir(execDir)
-	if locale.LoadSettings(binDir).AutoRebuildOnChange {
-		if rebuildErr := ac.RebuildConfigIfDirty(); rebuildErr != nil {
-			debuglog.WarnLog("UpdateConfigFromSubscriptions: AutoRebuild after refresh failed: %v", rebuildErr)
+	// SPEC 045 фаза 9: убрали условный AutoRebuildOnChange — Update всегда
+	// сопровождается rebuild'ом, чтобы config.json не отставал от свежего
+	// cache. Best-effort: ошибка rebuild'а не отменяет успех Update'а, но
+	// её сообщение покажем пользователю в финальном toast'е.
+	rebuildErr := ac.RebuildConfigIfDirty()
+	if rebuildErr != nil {
+		debuglog.WarnLog("UpdateConfigFromSubscriptions: auto-rebuild after refresh failed: %v", rebuildErr)
+	}
+
+	// SPEC 045 фаза 9: финальный toast эмитим ЗДЕСЬ, не в RunParser-обёртке.
+	// Иначе при auto-update fallback'е (RebuildConfigIfDirty → Update) UI
+	// зависает на in-progress 100% — RunParser в этом пути не задействован.
+	// Сообщение учитывает rebuild error: success Update + failed Rebuild = частичный успех.
+	if ac.UIService != nil && ac.UIService.ShowSubsResultFunc != nil {
+		if rebuildErr != nil {
+			ac.UIService.ShowSubsResultFunc(false,
+				fmt.Sprintf("%s (rebuild failed: %v)", parserSuccessToastMessage(result), rebuildErr))
+		} else {
+			ac.UIService.ShowSubsResultFunc(true, parserSuccessToastMessage(result))
 		}
 	}
 
@@ -289,7 +295,7 @@ func (svc *ConfigService) loadParserConfigForUpdate() (*config.ParserConfig, *st
 // Параметр parserConfig оставлен в сигнатуре для backward-compat callsite'ов;
 // в SPEC 045 cleanup'е поле `BuildContext.ParserConfigJSON` удалено вместе
 // с блоком `@ParserConfig` в config.json. Аргумент игнорируется.
-func buildContextFromState(s *state.State, cache *build.ParsedCache, td *template.TemplateData, _ *config.ParserConfig) build.BuildContext {
+func (ac *AppController) buildContextFromState(s *state.State, cache *build.ParsedCache, td *template.TemplateData, _ *config.ParserConfig) build.BuildContext {
 	ctx := build.BuildContext{
 		Template:   td,
 		Cache:      cache,
@@ -313,6 +319,12 @@ func buildContextFromState(s *state.State, cache *build.ParsedCache, td *templat
 	// DNS scalars из state (могут жить в DNSOptions или vars; см. dnsConfigFromUpdate).
 	ctx.DNS = dnsConfigForUpdate(s)
 	ctx.Route = routeConfigForUpdate(s)
+	// SPEC 045 фаза 9: execDir нужен MergeRouteSection-у для резолва путей
+	// SRS файлов (bin/rule-sets/<tag>.srs). Без этого convertRuleSetToLocalRequired
+	// не может проверить наличие файла и валит build с «empty execDir».
+	if ac != nil && ac.FileService != nil {
+		ctx.Route.ExecDir = ac.FileService.ExecDir
+	}
 	return ctx
 }
 
@@ -512,6 +524,63 @@ func collectAllStageSourceIDs(execDir string) []string {
 	out := make([]string, 0, len(idSet))
 	for id := range idSet {
 		out = append(out, id)
+	}
+	return out
+}
+
+// collectAllStageRuleSetTags возвращает объединение rule-set tags из ВСЕХ
+// state-файлов в `bin/wizard_states/`. Для каждой CustomRule (и enabled, и
+// disabled — пользователь может перетоггнуть обратно, лишний download только
+// раздражает) обходит embedded rule_set[] и собирает поле `tag`.
+//
+// Используется для orphan GC `bin/rule-sets/` после Rebuild: live множество
+// = это объединение, всё за пределами — orphan.
+//
+// Multi-stage safety: тот же принцип что collectAllStageSourceIDs для
+// bin/subscriptions/. Без union'а Rebuild активного state'а сметёт .srs
+// нужные другому (неактивному) stage'у — переключение обратно требует
+// заново открыть Configurator и скачать.
+//
+// Read-only: errors per-file логируются и пропускаются.
+func collectAllStageRuleSetTags(execDir string) []string {
+	statesDir := platform.GetWizardStatesDir(execDir)
+	entries, err := os.ReadDir(statesDir)
+	if err != nil {
+		debuglog.WarnLog("collectAllStageRuleSetTags: readdir %s: %v", statesDir, err)
+		return nil
+	}
+
+	tagSet := make(map[string]struct{})
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		path := filepath.Join(statesDir, name)
+		s, loadErr := state.Load(path)
+		if loadErr != nil {
+			debuglog.DebugLog("collectAllStageRuleSetTags: skip %s: %v", path, loadErr)
+			continue
+		}
+		for i := range s.CustomRules {
+			for _, rs := range s.CustomRules[i].RuleSet {
+				var m map[string]interface{}
+				if err := json.Unmarshal(rs, &m); err != nil {
+					continue
+				}
+				if tag, ok := m["tag"].(string); ok && tag != "" {
+					tagSet[tag] = struct{}{}
+				}
+			}
+		}
+	}
+
+	out := make([]string, 0, len(tagSet))
+	for tag := range tagSet {
+		out = append(out, tag)
 	}
 	return out
 }

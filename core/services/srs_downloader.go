@@ -239,3 +239,49 @@ func DownloadSRSGroup(ctx context.Context, execDir string, entries []SRSEntry) e
 	}
 	return nil
 }
+
+// DeleteOrphanRuleSets удаляет файлы из bin/rule-sets/, чьих tags нет в knownTags.
+// Каноничная папка launcher-managed (как bin/subscriptions/) — третьим файлам
+// тут не место, удаляем всё что не в множестве, без exception'ов на расширение.
+//
+// Возвращает список удалённых имён файлов (для логов/метрик).
+//
+// Используется как orphan GC после Rebuild: build pipeline проходит по всем
+// enabled rules, собирает live tags, эта функция чистит остальное.
+// Multi-stage safety: caller должен передать union tags из ВСЕХ
+// bin/wizard_states/*.json (см. collectAllStageRuleSetTags), иначе rebuild
+// активного state'а сметёт .srs нужные другому (неактивному) stage'у.
+func DeleteOrphanRuleSets(execDir string, knownTags []string) ([]string, error) {
+	knownSet := make(map[string]struct{}, len(knownTags))
+	for _, tag := range knownTags {
+		knownSet[tag] = struct{}{}
+	}
+
+	dir := filepath.Join(execDir, constants.BinDirName, constants.RuleSetsDirName)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("DeleteOrphanRuleSets: readdir %s: %w", dir, err)
+	}
+
+	deleted := make([]string, 0)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Каноничный паттерн bin/rule-sets/<tag>.srs. Tag = name без .srs.
+		// Файлы без .srs (мусор / .tmp от прерванной DownloadSRS) тоже
+		// чистим — папка целиком launcher-managed.
+		tag := strings.TrimSuffix(name, ".srs")
+		if _, ok := knownSet[tag]; ok {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err == nil {
+			deleted = append(deleted, name)
+		}
+	}
+	return deleted, nil
+}

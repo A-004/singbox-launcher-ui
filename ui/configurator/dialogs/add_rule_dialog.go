@@ -27,7 +27,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -523,30 +522,12 @@ func ShowAddRuleDialog(presenter *wizardpresentation.WizardPresenter, editRule *
 		return obj, nil
 	}
 
-	srsTagFromURL := func(urlStr string) string {
-		u, err := url.Parse(urlStr)
-		if err != nil {
-			return ""
-		}
-		path := u.Path
-		if path == "" {
-			path = urlStr
-		}
-		if i := strings.LastIndex(path, "/"); i >= 0 {
-			path = path[i+1:]
-		}
-		path = strings.TrimSuffix(path, ".srs")
-		if path == "" {
-			return ""
-		}
-		return "custom-" + path
-	}
 	buildSRSRuleSetsAndTags := func() (ruleSets []json.RawMessage, tags []string, err error) {
 		lines := ParseLines(strings.TrimSpace(srsURLsEntry.Text), false)
 		if len(lines) == 0 {
 			return nil, nil, errors.New(locale.T("wizard.add_rule.error_srs_required"))
 		}
-		seenTags := make(map[string]int)
+		seen := make(map[string]bool)
 		for _, rawURL := range lines {
 			u := strings.TrimSpace(rawURL)
 			if u == "" {
@@ -554,13 +535,15 @@ func ShowAddRuleDialog(presenter *wizardpresentation.WizardPresenter, editRule *
 			}
 			tag := srsTagFromURL(u)
 			if tag == "" {
-				tag = "custom-srs"
+				continue
 			}
-			count := seenTags[tag]
-			seenTags[tag]++
-			if count > 0 {
-				tag = fmt.Sprintf("%s-%d", tag, count+1)
+			// Дедуп: один и тот же URL дважды → один rule_set entry.
+			// Content-addressed tag это гарантирует автоматически (same URL
+			// → same tag), просто скипаем второй раз.
+			if seen[tag] {
+				continue
 			}
+			seen[tag] = true
 			entry := map[string]interface{}{
 				"tag":    tag,
 				"type":   "remote",

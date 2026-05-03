@@ -7,6 +7,7 @@ import (
 
 	"singbox-launcher/core/build"
 	"singbox-launcher/core/events"
+	"singbox-launcher/core/services"
 	"singbox-launcher/core/state"
 	"singbox-launcher/core/template"
 	"singbox-launcher/internal/debuglog"
@@ -92,7 +93,7 @@ func (ac *AppController) RebuildConfigIfDirty() error {
 
 	// Step 4: build.
 	parserCfg := s.ParserConfig
-	ctx := buildContextFromState(s, cacheSnap, td, &parserCfg)
+	ctx := ac.buildContextFromState(s, cacheSnap, td, &parserCfg)
 	res, err := build.BuildConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
@@ -101,6 +102,17 @@ func (ac *AppController) RebuildConfigIfDirty() error {
 	// Step 5: atomic write.
 	if err := atomicWriteConfig(ac.FileService.ConfigPath, res.ConfigJSON); err != nil {
 		return fmt.Errorf("write config: %w", err)
+	}
+
+	// Step 5.5: orphan GC для bin/rule-sets/. Параллельно тому что
+	// refreshSubscriptionsMetaAndCache делает для bin/subscriptions/.
+	// Live tags = union из всех stages (multi-stage safety). Удаляем
+	// .srs файлы которые уже не упоминаются ни одним stage'ом.
+	knownTags := collectAllStageRuleSetTags(execDir)
+	if deleted, gcErr := services.DeleteOrphanRuleSets(execDir, knownTags); gcErr != nil {
+		debuglog.WarnLog("RebuildConfigIfDirty: DeleteOrphanRuleSets: %v", gcErr)
+	} else if len(deleted) > 0 {
+		debuglog.InfoLog("RebuildConfigIfDirty: GC removed %d orphan rule-set file(s): %v", len(deleted), deleted)
 	}
 
 	// Step 6: clear ConfigStale (config теперь свеж относительно state+cache).

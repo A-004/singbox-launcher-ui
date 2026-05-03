@@ -153,6 +153,52 @@
 - [ ] Переименовать папку `SPECS/045-F-N-STATE_CONFIG_DECOUPLING` → `SPECS/045-F-C-STATE_CONFIG_DECOUPLING`.
 - [ ] SPEC 047 (events) — закрытие отдельным `IMPLEMENTATION_REPORT.md` в его папке + rename `047-F-N-` → `047-F-C-`.
 
+## ✅ Фаза 9 — Восстановление local-only rule-sets + auto-rebuild на close (v0.9.2 hotfix)
+
+**Контекст регрессии:** SPEC 045/052 убрали из старого pipeline'а шаг «rule_set type:remote → emit type:local если файл скачан». В результате config.json уезжал с `type: remote, url: https://raw.githubusercontent.com/runetfreedom/...`, sing-box при старте пытался скачать через `route.final = auto-proxy-out` (VPN-прокси), httpupgrade-эндпоинт прокси возвращал 404, sing-box падал с FATAL. Старый процесс из v0.8.x: при выборе rule-set'а из UI скачивался файл в `bin/rule-sets/<tag>.srs`, в config.json уезжал `type: local` — sing-box стартовал оффлайн.
+
+**Решение:** восстановить старый контракт «sing-box получает только локальные SRS», но архитектурно чисто.
+
+### ✅ 9.1 Build pipeline — local-only emit
+- [x] `core/build/route_merge.go::convertRuleSetToLocalRequired` (rename из `convertRuleSetToLocalIfNeeded`):
+  - `inline` → as-is
+  - `local` + файл по path есть → as-is; файла нет → **error** «open Configurator → Rules and re-download»
+  - `remote` + `bin/rule-sets/<tag>.srs` есть → переписываем на `{type: local, format: binary, path: ...}`; нет → **error** (тот же месседж)
+  - неизвестный type → as-is (sing-box разберётся)
+- [x] `MergeRouteSection` пробрасывает error → `BuildConfig` → `RebuildConfigIfDirty` не пишет config.json. Sing-box не получает невалидный config никогда.
+
+### ✅ 9.2 State остаётся декларативным
+- [x] `custom_rules[i].rule_set[j]` хранит `{type: remote, url}` без изменений после download. Download — операция кеша на диске, не пользовательский edit, dirty marker не дёргает.
+- [x] Build pipeline единственный, кто решает что попадает в config.json (поэтому и проверки тоже там).
+- [x] Преимущества: state портативен между машинами, нет «хитрых таймингов» когда state мутируется.
+
+### ✅ 9.3 UI gate (уже было)
+- [x] `ui/configurator/tabs/rules_tab.go::createRuleEnableCheckbox` (lines 322-331): при клике на enable если SRS файлы не скачаны — триггер download, checkbox блокируется до успеха. Существовало до фазы 9, проверено.
+
+### ✅ 9.4 Content-addressed tag для user-added rules
+- [x] `ui/configurator/dialogs/add_rule_dialog.go::srsTagFromURL`: `<filename-без-srs>-<hash8(sha256(url))>`. Same URL → same tag (дедуп через seen-set). Different URL с одинаковым filename → разные tags (collision impossible).
+- [x] Template-shipped tags (`ru-blocked-main`, `ads-all`, `games`, ...) не трогаем — handcrafted, уникальность гарантирует автор шаблона.
+
+### ✅ 9.5 Orphan GC `bin/rule-sets/`
+- [x] `core/services/srs_downloader.go::DeleteOrphanRuleSets(execDir, knownTags)`: walk `bin/rule-sets/`, для каждого файла tag = name без `.srs`, не в knownSet → `os.Remove`. Папка целиком launcher-managed, без exception на расширение.
+- [x] `core/config_service.go::collectAllStageRuleSetTags(execDir)`: union по всем `bin/wizard_states/*.json`, для каждого state walk `CustomRules[].RuleSet[]`, выдрать `tag`. И enabled, и disabled (пользователь может перетоггнуть, лишний download раздражает).
+- [x] Вызов из `core/rebuild.go::RebuildConfigIfDirty` после `atomicWriteConfig`. Multi-stage safety тот же что для `bin/subscriptions/` orphan GC из SPEC 052.
+
+### ✅ 9.6 Auto-rebuild на close Configurator
+- [x] `ui/configurator/configurator.go::handleCloseButton`: ВСЕ ветки (Save / Discard / SaveInProgress / no-changes) заканчиваются `triggerAutoRebuildOnClose()`. `RebuildConfigIfDirty` сам no-op'нется если ничего не dirty.
+- [x] `triggerAutoRebuildOnClose` запускает `ac.RebuildConfigIfDirty()` в goroutine (best-effort, окно уже закрыто). Ошибка логируется, в Core Dashboard статус обновится через `UpdateConfigStatusFunc`.
+- [x] Workflow упростился: Open Configurator → enable rules (auto-download) → close → Start. Без явного Update / Rebuild.
+
+### ⏸ 9.7 Тесты (отдельная итерация)
+- [ ] `core/build/route_merge_test.go`: переписать `TestConvertRuleSetToLocal*` под новые семантики; добавить `TestConvertRuleSetToLocalRequired_LocalMissing`, `TestConvertRuleSetToLocalRequired_LocalPresent`, `TestConvertRuleSetToLocalRequired_RemotePromoted`, `TestConvertRuleSetToLocalRequired_RemoteMissing`.
+- [ ] `core/services/srs_downloader_test.go`: `TestDeleteOrphanRuleSets_RemovesUnknown`, `TestDeleteOrphanRuleSets_PreservesKnown`, `TestDeleteOrphanRuleSets_HandlesMissingDir`.
+- [ ] `core/config_service_test.go`: `TestCollectAllStageRuleSetTags_UnionAcrossStates`, `TestCollectAllStageRuleSetTags_IncludesDisabled`.
+- [ ] `ui/configurator/dialogs/add_rule_dialog_test.go`: `TestSrsTagFromURL_ContentAddressed`, `TestSrsTagFromURL_DifferentURLsDifferentTags`, `TestSrsTagFromURL_SameURLSameTag`.
+
+### ⏸ 9.8 Документация
+- [ ] `docs/ARCHITECTURE.md`: подсекция «SRS local-only» с описанием контракта build pipeline.
+- [ ] `docs/release_notes/upcoming.md` (EN + RU): hotfix v0.9.2.
+
 ## Гейты качества (на каждом коммите/итерации)
 
 - [x] `go build ./...` — зелёный (текущее состояние).

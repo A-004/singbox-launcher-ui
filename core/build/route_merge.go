@@ -2,6 +2,8 @@ package build
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 
 	"singbox-launcher/core/services"
@@ -98,9 +100,19 @@ func MergeRouteSection(raw json.RawMessage, cfg RouteConfig) (json.RawMessage, e
 		if !r.Enabled {
 			continue
 		}
-		// SRS rule_sets от этого правила.
+		// SRS rule_sets от этого правила. Build pipeline эмитит ТОЛЬКО type:local
+		// (см. convertRuleSetToLocalRequired) — sing-box получает гарантированно
+		// локальные пути, никаких runtime-фетчей через VPN. UI gate
+		// (rules_tab.go createRuleEnableCheckbox) обеспечивает что файл
+		// уже скачан до того как rule был enabled. Если файл всё-таки missing
+		// (manual delete, multi-stage переключение, race) — Rebuild возвращает
+		// error, конфиг не пересобирается; пользователь видит сообщение и
+		// перекачивает SRS вручную через Wizard.
 		for _, rs := range r.RuleSets {
-			rsObj := convertRuleSetToLocalIfNeeded(rs, cfg.ExecDir)
+			rsObj, err := convertRuleSetToLocalRequired(rs, cfg.ExecDir)
+			if err != nil {
+				return nil, err
+			}
 			if rsObj != nil {
 				ruleSets = append(ruleSets, rsObj)
 			}
@@ -162,35 +174,81 @@ func applyRouteOutbound(cloned map[string]interface{}, outbound string) {
 	}
 }
 
-// convertRuleSetToLocalIfNeeded для remote-SRS подставляет type:local + path,
-// если локальный файл `bin/rule-sets/<tag>.srs` существует. Если файла нет —
-// rule-set остаётся remote, sing-box скачает его при старте.
+// convertRuleSetToLocalRequired эмитит rule-set строго как type:local (или
+// inline). Логика по типу:
 //
-// Это поведение нужно для двух кейсов:
-//  1. Шаблонные SRS, которые скачаны при первом Save → быстрая загрузка из disk.
-//  2. Пользовательские SRS, добавленные через UI → тоже local.
+//   - inline → пропускаем как есть
+//   - local  → проверяем что файл по path существует; если нет — error
+//   - remote → проверяем что bin/rule-sets/<tag>.srs существует; если есть —
+//     переписываем на type:local + path и эмитим, если нет — error
+//
+// Это поведение восстановления старого процесса из v0.8.x: sing-box при старте
+// никогда не должен пытаться скачивать rule-set через VPN-прокси (триггерит
+// 404-storm на cold-start, sing-box падает с FATAL). Кэш в bin/rule-sets/
+// гарантирует оффлайн Rebuild и оффлайн запуск sing-box.
+//
+// UI gate в Configurator (rules_tab.go createRuleEnableCheckbox) обеспечивает
+// download до enable rule. Build error здесь — safety net на 0.1% кейсов:
+//   - пользователь руками удалил файл из bin/rule-sets/
+//   - multi-stage: переключение на стейдж со старыми ссылками после GC соседнего
+//   - state.json пришёл с другой машины с уже-local entry, но файла нет
 //
 // Идемпотентно: повторный вызов с тем же rule-set даёт тот же результат.
-func convertRuleSetToLocalIfNeeded(rs json.RawMessage, execDir string) interface{} {
+func convertRuleSetToLocalRequired(rs json.RawMessage, execDir string) (interface{}, error) {
 	var m map[string]interface{}
 	if err := json.Unmarshal(rs, &m); err != nil {
-		return nil
+		return nil, fmt.Errorf("rule-set: invalid JSON: %w", err)
 	}
 	typ, _ := m["type"].(string)
 	tag, _ := m["tag"].(string)
-	if typ != "remote" || tag == "" || execDir == "" {
-		return m
-	}
 
-	if services.SRSFileExists(execDir, tag) {
+	switch typ {
+	case "inline":
+		return m, nil
+
+	case "local":
+		// Проверяем существование указанного path. Сам entry эмитим без
+		// модификаций (path уже в нём).
+		path, _ := m["path"].(string)
+		if path == "" {
+			if tag == "" {
+				return nil, fmt.Errorf("rule-set: local entry missing both tag and path")
+			}
+			return nil, fmt.Errorf("rule-set %q: local entry missing path", tag)
+		}
+		if _, err := os.Stat(path); err != nil {
+			label := tag
+			if label == "" {
+				label = path
+			}
+			return nil, fmt.Errorf("rule-set %q: local file missing at %s — open Configurator → Rules and re-download",
+				label, path)
+		}
+		return m, nil
+
+	case "remote":
+		if tag == "" {
+			return nil, fmt.Errorf("rule-set: remote entry missing tag")
+		}
+		if execDir == "" {
+			return nil, fmt.Errorf("rule-set %q: cannot resolve local path (empty execDir)", tag)
+		}
+		if !services.SRSFileExists(execDir, tag) {
+			return nil, fmt.Errorf("rule-set %q: local file missing at %s — open Configurator → Rules and re-download",
+				tag, services.RuleSRSPath(execDir, tag))
+		}
 		return map[string]interface{}{
 			"tag":    tag,
 			"type":   "local",
 			"format": "binary",
 			"path":   services.RuleSRSPath(execDir, tag),
-		}
+		}, nil
+
+	default:
+		// Неизвестный type → пропускаем без изменений (sing-box разберётся
+		// или упадёт на validate). Не наша зона ответственности.
+		return m, nil
 	}
-	return m
 }
 
 // shallowCopyStringMap — поверхностная копия map[string]interface{}.

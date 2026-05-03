@@ -44,7 +44,6 @@ import (
 	"singbox-launcher/internal/debuglog"
 	"singbox-launcher/internal/dialogs"
 	"singbox-launcher/internal/locale"
-	"singbox-launcher/internal/platform"
 	wizardbusiness "singbox-launcher/ui/configurator/business"
 	wizardmodels "singbox-launcher/ui/configurator/models"
 )
@@ -180,17 +179,20 @@ func (p *WizardPresenter) executeSaveOperation() {
 			})
 		}
 
-		// AutoRebuildOnChange — если пользователь включил тоггл,
-		// сразу пересобираем config.json из свежего state. Best-effort:
-		// fail rebuild'а не отменяет успех Save (state.json уже на диске).
-		if ac.FileService != nil {
-			binDir := platform.GetBinDir(ac.FileService.ExecDir)
-			if locale.LoadSettings(binDir).AutoRebuildOnChange {
-				if err := ac.RebuildConfigIfDirty(); err != nil {
-					debuglog.WarnLog("Save: AutoRebuild after Save failed: %v", err)
-				}
+		// Auto-rebuild после Save — теперь безусловно (SPEC 045 фаза 9).
+		// Старый AutoRebuildOnChange toggle был артефактом времён, когда
+		// rebuild считался дорогой опциональной операцией. С SPEC 052 cache
+		// + SPEC 045 build pipeline rebuild оффлайн и быстрый — нет смысла
+		// требовать от пользователя ещё одного клика после Save.
+		// Best-effort: fail rebuild'а не отменяет успех Save (state.json
+		// уже на диске). Build error (например missing SRS) залогируется,
+		// dirty маркеры на Update/Restart останутся горящими, пользователь
+		// разрулит через UI.
+		go func() {
+			if err := ac.RebuildConfigIfDirty(); err != nil {
+				debuglog.WarnLog("Save: auto-rebuild after Save failed: %v", err)
 			}
-		}
+		}()
 
 		// Step 3: success dialog. Передаём путь к state.json — это то, что
 		// мы только что записали; config.json пересоберётся при Update/Restart.

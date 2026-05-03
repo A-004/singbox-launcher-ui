@@ -8,6 +8,20 @@
 
 ---
 
+### Выжимка (RU) — v0.9.2
+
+Hotfix-релиз. SRS rule-sets снова попадают в `config.json` только как `type: local` — восстановлено поведение v0.8.x, потерянное в v0.9.0/v0.9.1 рефакторе. На cold-start v0.9.x sing-box падал с `FATAL: start service: initialize rule-set ... v2ray-http-upgrade: unexpected status: 404` потому что пытался скачивать remote rule-sets через VPN-прокси. Build pipeline теперь эмитит local-only (с проверкой существования файла, error если нет), UI gate блокирует enable rule до успешного download. **Auto-rebuild после Save / Update**: убран toggle `Auto Rebuild on Change` и дублирующая кнопка `Refresh & Rebuild` — обычный Update делает оба прохода. **Content-addressed SRS tag** для user-added rules (`<filename>-<hash8(URL)>`), коллизии невозможны. **Orphan GC** для `bin/rule-sets/` после каждого rebuild с union тегов из всех `wizard_states/*.json`. Существующие сломанные установки лечатся автоматически на следующем Save.
+
+**Полный список изменений:** [docs/release_notes/0-9-2.md](docs/release_notes/0-9-2.md).
+
+### Highlights (EN) — v0.9.2
+
+Hotfix release. SRS rule-sets are once again emitted into `config.json` strictly as `type: local` — restoring v0.8.x behavior that v0.9.0/v0.9.1 architecture refactor accidentally broke. On cold-start v0.9.x, sing-box died with `FATAL: start service: initialize rule-set ... v2ray-http-upgrade: unexpected status: 404` because it tried to fetch remote rule-sets through the VPN proxy. The build pipeline now emits local-only (with file-existence check, error if missing); UI gate blocks rule enable until the SRS file is present. **Auto-rebuild after Save / Update**: the `Auto Rebuild on Change` toggle and the duplicate `Refresh & Rebuild` button are gone — the regular Update does both passes. **Content-addressed SRS tag** for user-added rules (`<filename>-<hash8(URL)>`), collisions impossible. **Orphan GC** for `bin/rule-sets/` after every rebuild, scanning the union of tags across all `wizard_states/*.json`. Existing broken installs heal automatically on the next Save.
+
+**Full changelog:** [docs/release_notes/0-9-2.md](docs/release_notes/0-9-2.md).
+
+---
+
 ### Выжимка (RU) — v0.9.1
 
 Hotfix к v0.9.0. Чистая инсталляция (без `state.json`) ловила `FATAL: default outbound not found: proxy-out` от sing-box и неинформативный «Refresh failed: load state: state: file not found» с per-source кнопки Refresh. Корни: (1) `loadConfigFromFile` при загрузке шаблона заполнял только `model.ParserConfigJSON`, но не canonical `model.GlobalOutbounds` → state.json уезжал с пустыми outbounds → config.json без `proxy-out` / `auto-proxy-out` селекторов; (2) `RefreshSingleSubscription` делал `state.Load` до мутации, на cold-start падал. Двойной фикс: канонический `GlobalOutbounds` теперь seed'ится из template, плюс heal-on-empty в `restoreParserConfig` лечит уже сломанный state. Новый `RefreshSourceInPlace(*Source)` работает с in-memory указателем без обращения к state.json (правильное per-source decoupling per SPEC 052). Cold-start `[ERROR]` шум в логе (`LoadClashAPIConfig`, `clash_api_tab`) демонтирован до DEBUG для `os.IsNotExist`. Текст диалога «Configuration Not Found» обновлён во всех 11 локалях под актуальный SPEC 045/052 поток.

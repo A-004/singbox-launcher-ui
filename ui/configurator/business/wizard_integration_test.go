@@ -1,6 +1,7 @@
 package business
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,9 +9,50 @@ import (
 
 	"github.com/muhammadmuzzammil1998/jsonc"
 
-	wizardmodels "singbox-launcher/ui/configurator/models"
+	"singbox-launcher/core/services"
 	wizardtemplate "singbox-launcher/core/template"
+	wizardmodels "singbox-launcher/ui/configurator/models"
 )
+
+// stubLocalSRSForRules pre-creates empty bin/rule-sets/<tag>.srs stub files
+// for every remote rule_set tag referenced by enabled custom_rules. Required
+// because build pipeline now requires local files (SPEC 045 hardening, was
+// silent fallback to remote pre-v0.9.2 — restored from v0.8.x semantics).
+//
+// Test cleanup removes only the files this helper created; pre-existing
+// fixtures stay untouched.
+func stubLocalSRSForRules(t *testing.T, execDir string, rules []*wizardmodels.RuleState) {
+	t.Helper()
+	for _, r := range rules {
+		if r == nil || !r.Enabled {
+			continue
+		}
+		for _, rs := range r.Rule.RuleSets {
+			var m map[string]interface{}
+			if err := json.Unmarshal(rs, &m); err != nil {
+				continue
+			}
+			if m["type"] != "remote" {
+				continue
+			}
+			tag, _ := m["tag"].(string)
+			if tag == "" {
+				continue
+			}
+			path := services.RuleSRSPath(execDir, tag)
+			if _, err := os.Stat(path); err == nil {
+				continue // already present, leave alone
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("stubLocalSRSForRules: mkdir %s: %v", filepath.Dir(path), err)
+			}
+			if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
+				t.Fatalf("stubLocalSRSForRules: write %s: %v", path, err)
+			}
+			t.Cleanup(func() { _ = os.Remove(path) })
+		}
+	}
+}
 
 // TestDefaultWizardFlow_NextNextFinish simulates the most common user flow:
 // open wizard -> click next-next-finish with default settings (no manual edits).
@@ -55,6 +97,10 @@ func TestDefaultWizardFlow_NextNextFinish(t *testing.T) {
 	EnsureFinalSelected(model, options)
 	ApplyWizardDNSTemplate(model)
 	ApplyDNSVarsFromSettingsToModel(model)
+
+	// SPEC 045 hardening: build pipeline now requires local SRS files.
+	// Stub them out so the test focuses on wizard model→config flow.
+	stubLocalSRSForRules(t, execDir, model.CustomRules)
 
 	// Generate preview config (page 3 of wizard)
 	previewText, err := BuildPreviewConfig(model)
@@ -136,6 +182,9 @@ func TestWizardFlowWithCustomRules(t *testing.T) {
 
 	EnsureFinalSelected(model, options)
 	ApplyWizardDNSTemplate(model)
+
+	// SPEC 045 hardening: build pipeline now requires local SRS files.
+	stubLocalSRSForRules(t, execDir, model.CustomRules)
 
 	// Generate config
 	configText, err := BuildPreviewConfig(model)

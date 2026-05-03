@@ -946,6 +946,7 @@ singbox-launcher/
   - `BuildParserOutboundsBlock()` - формирование блока outbounds из сгенерированных outbounds
   - `buildEndpointsSection()` - формирование блока endpoints (WireGuard) между @ParserSTART_E и @ParserEND_E
   - `MergeRouteSection()` - слияние секции **`route`**: базовые **`rules`** / **`rule_set`** из шаблона, затем включённые правила из **`custom_rules`** модели (пресеты шаблона в `route` отдельно не подмешиваются — только через **`custom_rules`**)
+  - `convertRuleSetToLocalRequired()` - SRS local-only invariant (SPEC 045 фаза 9). Каждый rule_set перед эмитом в `config.json` приводится к `type: local` (с проверкой существования файла) или `inline`; `type: remote` запрещён. На отсутствующий файл возвращает error → `RebuildConfigIfDirty` не пишет `config.json`. Это гарантия что sing-box на старте не пытается скачать rule-set через VPN-прокси (источник cold-start `FATAL: v2ray-http-upgrade: 404` в v0.9.0/v0.9.1)
   - `FormatSectionJSON()`, `IndentMultiline()` - вспомогательные функции форматирования JSON
 - `validator.go`:
   - `ValidateParserConfig()` - валидация структуры и содержимого ParserConfig

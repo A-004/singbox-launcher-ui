@@ -130,7 +130,7 @@ func (e *ErrInvalidInputs) Error() string {
 //     в config.json не нужен).
 //
 // Pure: I/O только через template/MergeRouteSection (filesystem-проверка
-// SRS-файлов в convertRuleSetToLocalIfNeeded).
+// SRS-файлов в convertRuleSetToLocalRequired).
 func BuildConfig(ctx BuildContext) (Result, error) {
 	if ctx.Template == nil {
 		return Result{}, &ErrInvalidInputs{Reason: "Template is nil"}
