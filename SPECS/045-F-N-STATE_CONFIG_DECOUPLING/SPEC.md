@@ -77,6 +77,30 @@ Wizard Save **не** трогает `config.json` и **не** триггерит
 
 **PLAN.md и TASKS.md сейчас — скелеты** с пометкой «пишется по итогам фаз 0–1».
 
+## Контракт «SRS local-only» (фаза 9, hotfix v0.9.2)
+
+**Инвариант:** `config.json`, который sing-box получает на старте, **никогда** не содержит rule-set'ов с `type: remote`. Только `local` (с указанием на `bin/rule-sets/<tag>.srs`) или `inline` (определение прямо в config'е). Это восстановление старого процесса из v0.8.x.
+
+**Зачем:** sing-box при старте пытается скачать remote rule-set через `route.final` — обычно через VPN-прокси. Прокси-сервер с httpupgrade-транспортом возвращает 404 на произвольный HTTPS-таргет, sing-box падает с FATAL «start service: initialize rule-set... v2ray-http-upgrade: unexpected status: 404». Локальные SRS гарантируют оффлайн запуск независимо от состояния сети.
+
+**Разделение ответственности:**
+
+- **State (`custom_rules[*].rule_set[*]`)** — декларативное намерение: `{type: remote, url: ...}` сохраняется как есть. Download — операция кеша на диске, state не мутирует.
+- **UI gate (`createRuleEnableCheckbox`)** — блокирует enable rule до успешного download `bin/rule-sets/<tag>.srs`. Гарантирует presence файла на 99.9% обычного пути.
+- **Build pipeline (`convertRuleSetToLocalRequired`)** — единственная точка решения что попадает в config.json:
+  - `inline` → as-is
+  - `local` + файл по path есть → as-is, нет → **error**
+  - `remote` + `bin/rule-sets/<tag>.srs` есть → переписываем на local-форму, нет → **error**
+- **Error path** — error из `convertRuleSetToLocalRequired` → `MergeRouteSection` → `BuildConfig` → `RebuildConfigIfDirty` не пишет config.json. Sing-box не получает невалидный конфиг. Safety net для 0.1% (manual delete файла, multi-stage переключение).
+
+**Tag схема:**
+- Template-shipped (`ru-blocked-main`, `ads-all`, `games`, ...) — handcrafted в template, без изменений.
+- User-added через UI — content-addressed `<filename-без-srs>-<hash8(sha256(url))>`. Same URL → same tag (дедуп бесплатно). Different URL → different tag (collision impossible).
+
+**Orphan GC:** `RebuildConfigIfDirty` после atomic write вызывает `DeleteOrphanRuleSets` со списком tags из union по всем `bin/wizard_states/*.json` (multi-stage safety, тот же принцип что для `bin/subscriptions/`). Папка `bin/rule-sets/` целиком launcher-managed, всё что не в множестве — под нож, без exception на расширение.
+
+**Auto-rebuild на close Configurator:** `handleCloseButton` любую ветку (Save / Discard / SaveInProgress / no-changes) заканчивает `triggerAutoRebuildOnClose()`. `RebuildConfigIfDirty` сам no-op'нется если ничего не dirty. Workflow упрощается: `Open → enable rules (auto-download) → close → Start`. Без явного Update/Rebuild.
+
 ## Связи
 
 - **Источник TODO:** `docs/night-reports/2026-04-22.md` (локально, gitignored), блок «92697c7 — feat(core-dashboard): dirty-config маркер» раздел «Желаемый редизайн (по образцу мобильного LxBox)».
