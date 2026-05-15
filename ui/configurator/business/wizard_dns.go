@@ -707,6 +707,12 @@ func routeDefaultDomainResolver(route map[string]interface{}) string {
 }
 
 // DNSEnabledTagOptions returns tags for enabled servers in list order.
+// Включает: (1) tagи enabled legacy DNS servers из model.DNSServers,
+// (2) tagи bundled DNS-серверов от активных preset-ref'ов (читается через
+// PresetBundledDNSTags helper). Это даёт юзеру выбрать `final` /
+// `default_domain_resolver` в том числе из bundled DNS-серверов preset'а
+// (например `ru-direct:yandex_udp`).
+//
 // Выпадающие dns.final и route.default_domain_resolver показывают только эти теги: строка из скелета
 // без галочки «в конфиг» в список не попадает; при включённой галочке тело может браться из dns_options (см. mergeLockedRow).
 func DNSEnabledTagOptions(model *wizardmodels.WizardModel) []string {
@@ -715,6 +721,17 @@ func DNSEnabledTagOptions(model *wizardmodels.WizardModel) []string {
 	}
 	seen := make(map[string]struct{})
 	var out []string
+	addTag := func(tag string) {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			return
+		}
+		if _, ok := seen[tag]; ok {
+			return
+		}
+		seen[tag] = struct{}{}
+		out = append(out, tag)
+	}
 	for _, raw := range model.DNSServers {
 		var m map[string]interface{}
 		if json.Unmarshal(raw, &m) != nil {
@@ -724,15 +741,11 @@ func DNSEnabledTagOptions(model *wizardmodels.WizardModel) []string {
 			continue
 		}
 		tag, _ := m["tag"].(string)
-		tag = strings.TrimSpace(tag)
-		if tag == "" {
-			continue
-		}
-		if _, ok := seen[tag]; ok {
-			continue
-		}
-		seen[tag] = struct{}{}
-		out = append(out, tag)
+		addTag(tag)
+	}
+	// Bundled DNS servers from active preset-refs.
+	for _, tag := range PresetBundledDNSTags(model) {
+		addTag(tag)
 	}
 	return out
 }

@@ -325,6 +325,18 @@ func (ac *AppController) buildContextFromState(s *state.State, cache *build.Pars
 	if ac != nil && ac.FileService != nil {
 		ctx.Route.ExecDir = ac.FileService.ExecDir
 	}
+	// SPEC 053: preset bundle merge — все правила из state.RulesV6 в порядке.
+	// Если state.RulesV6 не пуст, MergePresetsIntoRoute берёт на себя весь emit
+	// (preset/inline/srs). Noop когда RulesV6 пуст (legacy v5-only flow).
+	ctx.Preset = build.PresetMergeContext{
+		Presets:        td.Presets,
+		RulesV6:        s.RulesV6,
+		DNS:            s.DNSV6,
+		SrsCachedPaths: build.CollectSrsCachedPaths(s.RulesV6, ac.FileService.ExecDir),
+	}
+	if ac != nil && ac.FileService != nil {
+		ctx.Preset.ExecDir = ac.FileService.ExecDir
+	}
 	return ctx
 }
 
@@ -361,11 +373,20 @@ func dnsConfigForUpdate(s *state.State) build.DNSConfig {
 
 // routeConfigForUpdate — конвертит state.CustomRules в build.RouteConfig.
 //
+// SPEC 053: если state.RulesV6 содержит правила — legacy CustomRules emit
+// **скипается** (RouteConfig.Rules = nil). Все правила (preset/inline/srs)
+// эмитятся через MergePresetsIntoRoute в правильном порядке из state.RulesV6.
+// Это избегает double-emit (правило не появится дважды в route.rules[]).
+//
 // `route.final` НЕ читается здесь: он подставляется на этапе
 // template-substitution через `@route_final` (state.vars["route_final"] →
 // template substituter → финальный config.json). MergeRouteSection видит
 // пустой FinalOutbound и оставляет уже-substituted шаблонное значение.
 func routeConfigForUpdate(s *state.State) build.RouteConfig {
+	if len(s.RulesV6) > 0 {
+		// v6 path: rules эмитятся через MergePresetsIntoRoute в правильном порядке.
+		return build.RouteConfig{}
+	}
 	rules := make([]build.RouteRule, 0, len(s.CustomRules))
 	for _, cr := range s.CustomRules {
 		outbound := cr.SelectedOutbound

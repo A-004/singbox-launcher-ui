@@ -9,6 +9,7 @@ import (
 
 	"singbox-launcher/core/config/configtypes"
 	v5 "singbox-launcher/core/state/v5"
+	v6 "singbox-launcher/core/state/v6"
 )
 
 // ErrNotFound — state-файл не существует. Вызывающий обычно интерпретирует
@@ -54,7 +55,9 @@ func Parse(data []byte) (*State, error) {
 	}
 
 	switch {
-	case probe.Meta.Version >= 5:
+	case probe.Meta.Version >= 6:
+		return parseV6(data)
+	case probe.Meta.Version == 5:
 		return parseV5(data)
 	case probe.TopLevelVersion >= 2 && probe.TopLevelVersion <= 4:
 		return parseLegacyAndMigrate(data)
@@ -64,6 +67,167 @@ func Parse(data []byte) (*State, error) {
 		return nil, fmt.Errorf("state: unsupported version (top=%d, meta.version=%d) — regenerate via Configurator",
 			probe.TopLevelVersion, probe.Meta.Version)
 	}
+}
+
+// parseV6 — прямой read v6-формата (SPEC 053).
+//
+// v6.State содержит:
+//   - meta {version: 6, schema: "presets_v1", ...}
+//   - connections (без изменений vs v5)
+//   - rules[] с kind discriminator (preset/inline/srs)
+//   - vars[] (глобальные template vars)
+//   - dns {template_servers, extra_servers, extra_rules, ...}
+//
+// Для backward-compat callsite'ов (UI rules_tab / dns_tab пока на v5-моделях)
+// genereтся legacy view (CustomRules + DNSOptions) — preset-ref правила
+// **пропускаются** в legacy view (их нельзя представить как CustomRule без
+// expansion'а через template; UI Phase 6 покажет их через новый dialog).
+func parseV6(data []byte) (*State, error) {
+	var raw struct {
+		Meta        v6.MetaSection        `json:"meta"`
+		Connections v5.ConnectionsSection `json:"connections"`
+		Rules       []v6.Rule             `json:"rules"`
+		Vars        []SettingVar          `json:"vars"`
+		DNS         v6.DNSConfig          `json:"dns"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("state: parse v6 json: %w", err)
+	}
+
+	s := &State{
+		Version:            raw.Meta.Version,
+		Comment:            raw.Meta.Comment,
+		Connections:        raw.Connections,
+		Vars:               raw.Vars,
+		RulesV6:            raw.Rules,
+		DNSV6:              raw.DNS,
+		RulesLibraryMerged: true,
+	}
+	if t, err := time.Parse(time.RFC3339, raw.Meta.CreatedAt); err == nil {
+		s.CreatedAt = t
+	}
+	if t, err := time.Parse(time.RFC3339, raw.Meta.UpdatedAt); err == nil {
+		s.UpdatedAt = t
+	}
+
+	// Generate legacy CustomRules view for backward-compat UI (Phase 6 will use RulesV6 directly).
+	s.CustomRules = legacyCustomRulesFromV6(raw.Rules)
+
+	// Generate legacy DNSOptions view (template overrides materialized as v5 entries).
+	s.DNSOptions = legacyDNSOptionsFromV6(raw.DNS)
+
+	syncLegacyFromConnections(s)
+	normalizeNilSlices(s)
+	return s, nil
+}
+
+// legacyCustomRulesFromV6 — конвертирует v6.Rules[] в legacy CustomRule view.
+//
+// Только kind=inline/srs конвертируются. kind=preset пропускается (не имеет
+// сериализованных match-полей — они в template; UI Phase 6 будет работать
+// с RulesV6 напрямую через новый edit dialog).
+func legacyCustomRulesFromV6(rules []v6.Rule) []CustomRule {
+	out := make([]CustomRule, 0, len(rules))
+	for _, r := range rules {
+		body, err := r.DecodeBody()
+		if err != nil {
+			continue
+		}
+		switch r.Kind {
+		case v6.RuleKindInline:
+			ib := body.(*v6.InlineBody)
+			cr := CustomRule{
+				Label:            ib.Name,
+				Enabled:          r.Enabled,
+				SelectedOutbound: ib.Outbound,
+				HasOutbound:      true,
+				Rule:             cloneMap(ib.Match),
+			}
+			// Restore outbound в Rule для legacy build-pipeline (он ожидает rule.outbound).
+			if cr.Rule == nil {
+				cr.Rule = map[string]interface{}{}
+			}
+			cr.Rule["outbound"] = ib.Outbound
+			out = append(out, cr)
+		case v6.RuleKindSrs:
+			sb := body.(*v6.SrsBody)
+			rsRaw, _ := json.Marshal(map[string]interface{}{
+				"type":   "remote",
+				"format": "binary",
+				"url":    sb.SrsURL,
+			})
+			cr := CustomRule{
+				Label:            sb.Name,
+				Type:             RuleTypeSRS,
+				Enabled:          r.Enabled,
+				SelectedOutbound: sb.Outbound,
+				HasOutbound:      true,
+				RuleSet:          []json.RawMessage{rsRaw},
+				Rule: map[string]interface{}{
+					"outbound": sb.Outbound,
+				},
+			}
+			out = append(out, cr)
+		case v6.RuleKindPreset:
+			// preset-ref пропускается в legacy view (UI Phase 6 покажет через новый dialog).
+			// При сохранении preset-ref'ы сохраняются обратно в RulesV6 без потери.
+		}
+	}
+	return out
+}
+
+// legacyDNSOptionsFromV6 — конвертирует v6.DNSConfig в legacy DNSOptions view.
+//
+// template_servers overrides материализуются как v5-style server entries
+// (тег + enabled). Сами template-default'ы не появляются здесь — их UI
+// получает из template'а отдельно.
+//
+// extra_servers + extra_rules конвертируются как есть.
+func legacyDNSOptionsFromV6(dns v6.DNSConfig) *DNSOptions {
+	if dns.Strategy == "" && dns.Final == "" && dns.DefaultDomainResolver == "" &&
+		len(dns.TemplateServers) == 0 && len(dns.ExtraServers) == 0 && len(dns.ExtraRules) == 0 {
+		return nil
+	}
+	opt := &DNSOptions{
+		Strategy:              dns.Strategy,
+		Final:                 dns.Final,
+		DefaultDomainResolver: dns.DefaultDomainResolver,
+	}
+	if dns.IndependentCache {
+		v := true
+		opt.IndependentCache = &v
+	}
+
+	// template_servers как server entries с enabled
+	for tag, ovr := range dns.TemplateServers {
+		entry := map[string]interface{}{
+			"tag":     tag,
+			"enabled": ovr.Enabled,
+		}
+		raw, _ := json.Marshal(entry)
+		opt.Servers = append(opt.Servers, raw)
+	}
+	for _, extra := range dns.ExtraServers {
+		raw, _ := json.Marshal(extra)
+		opt.Servers = append(opt.Servers, raw)
+	}
+	for _, extra := range dns.ExtraRules {
+		raw, _ := json.Marshal(extra)
+		opt.Rules = append(opt.Rules, raw)
+	}
+	return opt
+}
+
+// cloneMap — shallow copy of map[string]interface{} for safe legacy view generation.
+func cloneMap(in map[string]interface{}) map[string]interface{} {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // parseV5 — прямой read v5-формата.

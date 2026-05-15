@@ -315,7 +315,7 @@
   "wizard.source.refresh_failed": "Ошибка обновления: %s",
   "wizard.source.refresh_succeeded": "Обновлено успешно",
   "wizard.source.tab_overview": "Обзор",
-  "wizard.source.tab_raw": "Raw",
+  "wizard.source.tab_raw": "JSON",
   "wizard.source.label_url_edit": "URL подписки",
   "wizard.source.label_uri": "URI сервера",
   "wizard.source.label_label_field": "Метка",
@@ -524,7 +524,7 @@
   "wizard.add_rule.label_name": "Название правила:",
   "wizard.add_rule.label_type": "Тип правила:",
   "wizard.add_rule.tab_form": "Форма",
-  "wizard.add_rule.tab_raw": "Raw",
+  "wizard.add_rule.tab_raw": "JSON",
   "wizard.add_rule.error_name_required": "Название правила обязательно",
   "wizard.add_rule.error_raw_empty": "Raw JSON пуст",
   "wizard.add_rule.error_must_be_object": "правило должно быть JSON-объектом",
@@ -593,7 +593,7 @@
   "wizard.outbound.preview_also_includes": " | Также включает: %s",
   "wizard.outbound.preview_source_errors": " | ⚠️ %d ошибок источников",
   "wizard.outbound.tab_settings": "Настройки",
-  "wizard.outbound.tab_raw": "Raw",
+  "wizard.outbound.tab_raw": "JSON",
   "wizard.outbound.tab_preview": "Превью",
   "wizard.outbound.button_cancel": "Отмена",
   "wizard.outbound.button_save": "Сохранить",
@@ -639,5 +639,10 @@
   "core.state_save_as_success": "Сохранено как «%s»",
   "core.state_section_label": "Сохранённые состояния",
   "dialog.button_save": "Сохранить",
-  "dialog.button_cancel": "Отмена"
+  "dialog.button_cancel": "Отмена",
+  "wizard.shared.button_save": "Сохранить",
+  "wizard.rules.button_convert_to_user": "Преобразовать в пользовательское",
+  "wizard.rules.dialog_edit_rule_title": "Редактировать правило",
+  "wizard.dns.section_from_active_presets": "От активных пресетов (read-only)",
+  "wizard.add_rule.domain_mode_label": "Тип домена:"
 }

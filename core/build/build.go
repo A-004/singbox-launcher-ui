@@ -81,6 +81,11 @@ type BuildContext struct {
 
 	// Route — параметры merge'а route-секции. См. RouteConfig.
 	Route RouteConfig
+
+	// Preset (SPEC 053) — дополнительный merge pass поверх MergeRouteSection
+	// и MergeDNSSection. Активируется когда RulesV6 содержит preset-ref'ы или
+	// DNS имеет template_servers/extra_servers/extra_rules. Иначе noop.
+	Preset PresetMergeContext
 }
 
 // Result — итог сборки.
@@ -217,9 +222,19 @@ func buildSection(ctx BuildContext, key string, raw json.RawMessage) (string, er
 		if err != nil {
 			return "", err
 		}
+		// SPEC 053: append bundled DNS from active presets + extras + filter by overrides.
+		merged, err = MergePresetsIntoDNS(merged, ctx.Preset)
+		if err != nil {
+			return "", err
+		}
 		return FormatSectionJSON(merged, 2)
 	case "route":
 		merged, err := MergeRouteSection(raw, ctx.Route)
+		if err != nil {
+			return "", err
+		}
+		// SPEC 053: append preset-ref fragments (rule_set + routing rule).
+		merged, err = MergePresetsIntoRoute(merged, ctx.Preset)
 		if err != nil {
 			return "", err
 		}

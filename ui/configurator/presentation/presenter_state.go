@@ -102,6 +102,26 @@ func (p *WizardPresenter) CreateStateFromModel(comment, id string) *wizardmodels
 		state.CustomRules = append(state.CustomRules, persisted)
 	}
 
+	// SPEC 053: sync ВСЕХ правил с сохранением порядка RuleOrder.
+	// state.RulesV6 эмитится в том же порядке как UI Rules tab показывает
+	// (включая drag-reordering). Build pipeline затем эмитит fragments
+	// в config.json::route.rules[] в этом же порядке.
+	wizardmodels.ReconcileRuleOrder(p.model)
+	state.RulesV6 = wizardmodels.SyncRulesByOrderToStateRulesV6(
+		p.model.RuleOrder, p.model.PresetRefs, p.model.CustomRules,
+	)
+
+	// SPEC 053: full DNS sync — overrides + extra_servers + extra_rules.
+	// Template DNS tag-set извлекаем из template.dns_options для split'а
+	// model.DNSServers на template-overrides vs user-added extras.
+	templateDNSTags := extractTemplateDNSTags(p.model.TemplateData)
+	state.DNSV6 = wizardmodels.SyncDNSFullToStateV6(
+		p.model.DNSServers,
+		p.model.DNSRulesText,
+		p.model.DNSTemplateOverrides,
+		templateDNSTags,
+	)
+
 	// dns_options в state — только servers и rules; скаляры DNS — в state.vars (dns_*).
 	state.DNSOptions = &wizardmodels.PersistedDNSState{
 		Servers: append([]json.RawMessage(nil), p.model.DNSServers...),
@@ -230,6 +250,8 @@ func (p *WizardPresenter) LoadState(stateFile *wizardmodels.WizardStateFile) err
 	p.model.SelectableRuleStates = nil
 	p.restoreCustomRules(stateFile.CustomRules)
 	wizardbusiness.EnsureCustomRulesDefaultOutbounds(p.model)
+	// SPEC 053: restore preset-ref правила (kind=preset из state.RulesV6).
+	p.restorePresetRefs(stateFile)
 
 	// Установка флага для парсинга (шаг 7)
 	p.model.PreviewNeedsParse = true
@@ -305,6 +327,29 @@ func (p *WizardPresenter) restoreCustomRules(persistedRules []wizardmodels.Persi
 	for i := range persistedRules {
 		ruleState := wizardmodels.PersistedCustomRuleToRuleState(&persistedRules[i])
 		p.model.CustomRules = append(p.model.CustomRules, ruleState)
+	}
+}
+
+// restorePresetRefs (SPEC 053) — восстанавливает model.PresetRefs из state.RulesV6
+// и заполняет model.RuleOrder в порядке state.RulesV6 (так чтобы UI Rules tab
+// после load показал правила в том же порядке как при save).
+//
+// Только kind=preset entries попадают в PresetRefs; kind=inline/srs остаются
+// в CustomRules через restoreCustomRules + legacy view (см. parseV6).
+func (p *WizardPresenter) restorePresetRefs(state *wizardmodels.WizardStateFile) {
+	p.model.PresetRefs = wizardmodels.SyncStateRulesToPresetRefs(state.RulesV6)
+	p.model.DNSTemplateOverrides = wizardmodels.SyncStateV6ToDNSOverrides(state.DNSV6)
+
+	// Restore RuleOrder из state.RulesV6 (preserve порядок between save/load).
+	// Fallback на дефолтную последовательность если state v5 (нет RulesV6).
+	order := wizardmodels.RuleOrderFromStateRulesV6(state.RulesV6, p.model.PresetRefs, p.model.CustomRules)
+	if len(order) == 0 {
+		wizardmodels.RebuildRuleOrder(p.model)
+	} else {
+		p.model.RuleOrder = order
+		// Reconcile в случае если в model.CustomRules / PresetRefs есть entries
+		// которые не попали в order (могут быть после миграции v5→v6).
+		wizardmodels.ReconcileRuleOrder(p.model)
 	}
 }
 

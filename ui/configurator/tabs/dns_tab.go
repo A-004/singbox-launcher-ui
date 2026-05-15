@@ -76,6 +76,11 @@ func CreateDNSTab(presenter *wizardpresentation.WizardPresenter) fyne.CanvasObje
 			serversBox.Refresh()
 			return
 		}
+		// Bundled DNS-серверы от активных preset'ов (read-only секция).
+		// Юзер видит что preset реально добавляет в config.json::dns.servers[],
+		// но менять/удалять не может — это контент template'а.
+		bundledRows := renderPresetBundledDNSRows(m, dialogParent())
+
 		for i := range m.DNSServers {
 			func(idx int) {
 				var row *fynewidget.HoverRow
@@ -141,6 +146,18 @@ func CreateDNSTab(presenter *wizardpresentation.WizardPresenter) fyne.CanvasObje
 				row.WireTooltipLabelHover(sumLabel)
 				serversBox.Add(row)
 			}(i)
+		}
+		// Append bundled-preset section header + rows (если есть).
+		if len(bundledRows) > 0 {
+			serversBox.Add(widget.NewSeparator())
+			header := widget.NewLabelWithStyle(
+				locale.T("wizard.dns.section_from_active_presets"),
+				fyne.TextAlignLeading, fyne.TextStyle{Bold: true},
+			)
+			serversBox.Add(header)
+			for _, r := range bundledRows {
+				serversBox.Add(r)
+			}
 		}
 		serversBox.Refresh()
 	}
@@ -297,6 +314,57 @@ func CreateDNSTab(presenter *wizardpresentation.WizardPresenter) fyne.CanvasObje
 
 	refreshList()
 
+	// Bundled DNS rules от active preset-ref'ов — read-only список.
+	bundledRulesBox := container.NewVBox()
+	// User DNS rules — список с Edit/Delete; replaced legacy MultiLineEntry editor.
+	userRulesBox := container.NewVBox()
+
+	var refreshAll func()
+	rebuildBundledRules := func() {
+		rows := renderPresetBundledDNSRulesRows(presenter.Model(), dialogParent())
+		objs := make([]fyne.CanvasObject, 0, len(rows))
+		objs = append(objs, rows...)
+		bundledRulesBox.Objects = objs
+		bundledRulesBox.Refresh()
+	}
+	rebuildUserRules := func() {
+		rows := renderUserDNSRulesRows(presenter, dialogParent(), func() {
+			if refreshAll != nil {
+				refreshAll()
+			}
+		})
+		objs := make([]fyne.CanvasObject, 0, len(rows))
+		objs = append(objs, rows...)
+		userRulesBox.Objects = objs
+		userRulesBox.Refresh()
+	}
+	refreshAll = func() {
+		rebuildBundledRules()
+		rebuildUserRules()
+	}
+
+	previousRefresh := guiState.RefreshDNSList
+	guiState.RefreshDNSList = func() {
+		previousRefresh()
+		refreshAll()
+	}
+	refreshAll()
+
+	// [+ Add Rule] и [View All DNS Rules] кнопки внизу секции Rules.
+	addRuleBtn := widget.NewButton("+ Add Rule", func() {
+		showEditUserDNSRuleDialog(presenter, dialogParent(), -1, refreshAll)
+	})
+	addRuleBtn.Importance = widget.MediumImportance
+	viewAllBtn := widget.NewButton("View All DNS Rules", func() {
+		showViewAllDNSRulesDialog(presenter, dialogParent())
+	})
+	viewAllBtn.Importance = widget.LowImportance
+	rulesButtons := container.NewHBox(addRuleBtn, layout.NewSpacer(), viewAllBtn)
+
+	// Hide legacy MultiLineEntry rulesBlock — оставлен в коде для presenter sync,
+	// но не отображается в UI (юзер использует row-list + Add Rule dialog).
+	_ = rulesBlock
+
 	return container.NewVBox(
 		serversHeader,
 		serversScroll,
@@ -304,7 +372,9 @@ func CreateDNSTab(presenter *wizardpresentation.WizardPresenter) fyne.CanvasObje
 		strategyAndCacheRow,
 		widget.NewSeparator(),
 		rulesLabel,
-		rulesBlock,
+		bundledRulesBox,
+		userRulesBox,
+		rulesButtons,
 		widget.NewSeparator(),
 		finalAndResolverRow,
 	)
@@ -364,6 +434,17 @@ func setDNSServerEnabledAt(p *wizardpresentation.WizardPresenter, index int, ena
 	mod.DNSServers[index] = json.RawMessage(b)
 	mod.TemplatePreviewNeedsUpdate = true
 	p.MarkAsChanged()
+
+	// SPEC 053: параллельно пишем override в model.DNSTemplateOverrides по tag'у.
+	// На Save синхронизируется в state.DNSV6.TemplateServers через SyncDNSToStateV6.
+	// Если у юзера есть preset-ref'ы → save переключится на v6, и override повлияет
+	// через MergePresetsIntoDNS на финальный config.json::dns.servers[].
+	if tag, ok := obj["tag"].(string); ok && tag != "" {
+		if mod.DNSTemplateOverrides == nil {
+			mod.DNSTemplateOverrides = make(map[string]bool)
+		}
+		mod.DNSTemplateOverrides[tag] = enabled
+	}
 }
 
 func dnsJSONStringField(m map[string]interface{}, key string) string {

@@ -96,6 +96,21 @@ type WizardModel struct {
 	RulesLibraryMerged     bool // true после миграции/засева; сериализуется в state.json
 	SelectedFinalOutbound string
 
+	// PresetRefs — preset-ref правила (kind=preset). Хранятся параллельно
+	// CustomRules (которые держат kind=inline/srs). При Save копируются в
+	// state.RulesV6; на Load восстанавливаются из state.RulesV6.
+	// Каждый элемент — {Ref, Enabled, Vars}.
+	PresetRefs []*PresetRefState
+
+	// DNSTemplateOverrides — overrides для template-defined DNS-серверов.
+	// Map tag → enabled. Только tag'и где юзер изменил default_enabled.
+	DNSTemplateOverrides map[string]bool
+
+	// RuleOrder — единый упорядоченный список slot'ов, определяющий порядок
+	// отображения правил в Rules tab и порядок эмита в config.json::route.rules[].
+	// См. rule_slot.go для подробностей.
+	RuleOrder []RuleSlot
+
 	// SettingsVars — переопределения вкладки Settings (name → value); пустое значение ключа = дефолт шаблона.
 	SettingsVars map[string]string `json:"-"`
 
