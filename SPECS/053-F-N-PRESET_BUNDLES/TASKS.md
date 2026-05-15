@@ -1,190 +1,113 @@
 # SPEC 053 — Tasks
 
+**Status:** ✅ Все 8 фаз shipped + интеграция в build pipeline + UI handlers
+(DNS overrides, Convert to user rule, лок-иконка для bundled DNS rows,
+row-list DNS rules с Add/View All) + template content (6 preset'ов).
+Подробности — `IMPLEMENTATION_REPORT.md`.
+
 ## Phase 1 — Pure data types
 
 ### Template-side
-- [ ] `core/template/preset_types.go`
-  - [ ] `Preset` struct (ID, Label, Description, DefaultEnabled, Vars, RuleSet, DNSServers, Rule, DNSRule)
-  - [ ] `PresetVar` (Name, Type, Default, Title, Tooltip, Options json.RawMessage, Select, If, IfOr)
-  - [ ] `OptionEntry` (Title, Value) — для enum
-  - [ ] `PresetRuleSet` (Tag, Type, Format, Rules, URL, If, IfOr)
-  - [ ] `PresetDNSServer` (Tag, Type, Server, ServerPort, Path, TLS, Detour, Title, Description, If, IfOr)
-  - [ ] Custom UnmarshalJSON для Options (object form для enum, []string для dns_server/outbound)
-- [ ] `core/template/preset_types_test.go`
-  - [ ] Round-trip Form 1 (inline match)
-  - [ ] Round-trip Form 2 (single rule_set)
-  - [ ] Round-trip Form 3 (multi rule_set)
-  - [ ] Round-trip Form 4 (selective dns_rule)
-  - [ ] Round-trip Form 5 (reject sentinel)
-  - [ ] Round-trip ru-direct (real-world from SPEC)
-  - [ ] Options decoder: enum vs dns_server vs outbound
+- [x] `core/template/preset_types.go`
+  - [x] `Preset` struct (ID, Label, Description, DefaultEnabled, Vars, RuleSet, DNSServers, Rule, DNSRule)
+  - [x] `PresetVar` (Name, Type, Default, Title, Tooltip, Options json.RawMessage, Select, If, IfOr)
+  - [x] `OptionEntry` (Title, Value) — для enum
+  - [x] `PresetRuleSet` (Tag, Type, Format, Rules, URL, If, IfOr)
+  - [x] `PresetDNSServer` (Tag, Type, Server, ServerPort, Path, TLS, Detour, Title, Description, If, IfOr)
+  - [x] Custom UnmarshalJSON для Options (object form для enum, []string для dns_server/outbound)
+- [x] `core/template/preset_types_test.go` — round-trip + decoder tests (8 cases)
 
 ### State-side
-- [ ] `core/state/v6/rule_types.go`
-  - [ ] `Rule` header (Kind, Ref, ID, Enabled, Body json.RawMessage)
-  - [ ] `PresetBody` (Vars map[string]string)
-  - [ ] `InlineBody` (Name, Match, Outbound)
-  - [ ] `SrsBody` (Name, SrsURL, Outbound)
-  - [ ] `DNSConfig` (Strategy, IndependentCache, Final, DefaultDomainResolver, TemplateServers, ExtraServers, ExtraRules)
-  - [ ] `TemplateServerOvr` (Enabled)
-  - [ ] `DecodeRule(raw) (Rule, error)` dispatcher
-- [ ] `core/state/v6/rule_types_test.go`
-  - [ ] Round-trip preset-ref
-  - [ ] Round-trip user inline
-  - [ ] Round-trip user srs
-  - [ ] Unknown kind → error
-  - [ ] kind=preset с лишним `id` → strip + warning
-  - [ ] kind=inline без `id` → error
+- [x] `core/state/v6/rule_types.go` — Rule header + InlineBody/SrsBody/PresetBody + DNSConfig + DecodeRule
+- [x] `core/state/v6/rule_types_test.go` — 14 round-trip + error cases
 
 ## Phase 2 — Template parser + validation
 
-- [ ] `core/template/preset_loader.go`
-  - [ ] `LoadPresets(raw) ([]Preset, []Warning)` — non-fatal warnings
-  - [ ] Uniqueness validators (preset.id, vars[].name, rule_set[].tag, dns_servers[].tag)
-  - [ ] Reference resolvers (rule.rule_set, dns_rule.rule_set/server)
-  - [ ] If/IfOr type+existence check (только bool vars из этого preset'а)
-  - [ ] Default value validator (∈ options для enum/dns_server/outbound с whitelist)
-  - [ ] Select value validator (∈ {"local","global"}, только для type=dns_server)
-  - [ ] Vars scope collision check (vs template.vars[*]) — warning
-- [ ] `core/template/preset_loader_test.go`
-  - [ ] Каждый validation case
-  - [ ] ru-direct без warnings
-  - [ ] Намеренно-сломанные пресеты дают expected warnings
-- [ ] `core/template/loader.go` (модификация)
-  - [ ] Parse `presets[]` секции из template
-  - [ ] Log warnings через `debuglog`
-  - [ ] Сохранить legacy `selectable_rules[]` parsing (одновременно)
+- [x] `core/template/preset_loader.go` — LoadPresets + full validator taxonomy
+- [x] `core/template/preset_loader_test.go` — 17 validation cases
+- [x] `core/template/loader.go` — Parse `presets[]`, log warnings, keep legacy `selectable_rules[]` parser
 
 ## Phase 3 — Preset expansion engine
 
-- [ ] `core/build/preset_expand.go`
-  - [ ] `_substitute(obj, vars) any` — рекурсивный текстовый замен
-  - [ ] `evalIf(vars, if, if_or) bool` — переиспользует `ParamBoolVarTrue`
-  - [ ] `filterByIf(fragments, vars)` — фильтр условных фрагментов
-  - [ ] `prefixTags(preset_id, fragments)` — `<preset_id>:<local_tag>`
-  - [ ] `filterDnsServers(preset, varsMap)` — только использованные через @dns_server / литерал
-  - [ ] `applyOutboundSentinels(rule, outbound)` — wraps ApplyOutboundToRule
-  - [ ] `cleanDanglingRuleSetRefs(rule, emittedTags)` — убрать ссылки на отсутствующие
-  - [ ] `directOutDetourStrip(dnsServer)` — `detour: direct-out` → strip
-  - [ ] `ExpandPreset(preset, body PresetBody, ctx) (Fragments, []Warning)` — public API
-- [ ] `core/build/preset_expand_test.go`
-  - [ ] Case 1: default varsValues → ожидаемый emit
-  - [ ] Case 2: `use_dns_override: false` → no DNS bundle
-  - [ ] Case 3: `geoip_enabled: false` → rule_set дроп + ref clean
-  - [ ] Case 4: юзер сменил bundled DNS → filter swap
-  - [ ] Broken: unresolved @var → skip preset + warning
-  - [ ] Broken: unknown var в varsValues (template var удалён) → warning + use default
-  - [ ] `direct-out` detour strip из dns_server
+- [x] `core/build/preset_expand.go` — substitute / evalIf / filterByIf / prefixTags / filterDnsServers / applyOutboundSentinels / cleanDanglingRuleSetRefs / directOutDetourStrip / ExpandPreset
+- [x] `core/build/preset_expand_test.go` — 12 cases incl. 4 golden для ru-direct
 
 ## Phase 4 — State v5 → v6 migration
 
-- [ ] `core/state/v6/migration.go`
-  - [ ] `MigrateV5ToV6(oldState) (newState, []Warning)` pure func
-  - [ ] `custom_rules[]` → `rules[]` с kind detect (inline/srs heuristic по rule_set[0].type)
-  - [ ] Generate ULID для user-defined правил
-  - [ ] `selectable_rule_states` (legacy) → preset-refs если ID совпадает по label
-  - [ ] `dns_options.servers[]` split:
-    - [ ] tag совпадает с template-defined → `template_servers[tag] = {enabled}` если != default
-    - [ ] tag user-added → `extra_servers[]`
-  - [ ] `dns_options.rules[]` → `state.dns.extra_rules[]`
-- [ ] `core/state/v6/migration_test.go`
-  - [ ] Real v5 fixture (`testdata/state_v5_real.json`) → expected v6
-  - [ ] Идемпотентность: v6 → migrate (noop) → identical v6
-  - [ ] Round-trip: v5 → v6 → JSON → v6 (no drift)
-- [ ] `core/state/load.go` (модификация)
-  - [ ] Detection branch: `meta.version == 5/6/unknown`
-  - [ ] Backup `state.json.v5.bak` (atomic copy) при первом upgrade'е
-- [ ] `core/state/save.go` (модификация)
-  - [ ] Always write `meta.version = 6`, `meta.schema = "presets_v1"`
+- [x] `core/state/v6/migration.go` — MigrateV5ToV6 (pure)
+- [x] `core/state/v6/migration_test.go` — real-fixture + idempotency + round-trip (11 cases)
+- [x] `core/state/load.go` — parseV6 ветка (read v5 + v6) + legacyCustomRulesFromV6 / legacyDNSOptionsFromV6 views
+- [x] `core/state/save.go` — marshalDiskV6 + atomic `state.json.v5.bak` (one-time, idempotent)
+- [x] `core/state/v6_integration_test.go` — 7 load/save/backup tests
 
 ## Phase 5 — Build pipeline integration
 
-- [ ] `core/build/rules_pipeline.go`
-  - [ ] `BuildRulesAndDNS(template, state, ctx) (RouteSection, DNSSection)` — pure func
-  - [ ] preset-ref → ExpandPreset → append fragments
-  - [ ] user inline → emit headless rule_set + route rule
-  - [ ] user srs → emit local rule_set (если cached) + route rule
-  - [ ] Hijack-dns rule в начале route.rules[]
-  - [ ] Merge: identical-skip / first-wins для rule_set и dns_servers по tag
-  - [ ] DNS section: `template.dns_defaults.servers.filter(effective_enabled) + bundled + extras`
-  - [ ] `effective_enabled(tag, state)` resolver
-- [ ] `core/build/rules_pipeline_test.go`
-  - [ ] Mixed: preset + inline + srs → корректный merged config
-  - [ ] Identical-skip сценарий (два preset'а с одинаковым tag/контентом)
-  - [ ] First-wins сценарий (один tag, разный контент) → warning
-  - [ ] effective_enabled override (state.dns.template_servers)
-- [ ] `core/rebuild.go` (модификация)
-  - [ ] Замена legacy applyCustomRules + DNS merge на новый pipeline
-- [ ] Golden fixtures `core/build/testdata/golden/`:
-  - [ ] `preset_ru_direct_default.json`
-  - [ ] `preset_ru_direct_no_dns.json`
-  - [ ] `preset_ru_direct_no_geoip.json`
-  - [ ] `preset_ru_direct_yandex_doh.json`
-  - [ ] `mixed_preset_inline_srs.json`
+- [x] `core/build/rules_pipeline.go` — BuildRulesAndDNS orchestrator (preset expansion + user inline/srs + DNS merge с effective_enabled)
+- [x] `core/build/rules_pipeline_test.go` — 14 cases (mixed/identical-skip/first-wins/effective_enabled)
+- [x] `core/build/preset_merge.go` (NEW) — `MergePresetsIntoRoute` + `MergePresetsIntoDNS` дополнительный pass поверх legacy merge'а
+- [x] `core/build/preset_merge_test.go` — 8 unit-tests
+- [x] `core/build/build.go` — `BuildContext.Preset` поле + вызов из `buildSection` для секций `dns` и `route`
+- [x] `core/config_service.go` — `buildContextFromState` заполняет `ctx.Preset` из `td.Presets + s.RulesV6 + s.DNSV6`
+- [x] `internal/outboundutil/outbound.go` (NEW) — shared reject/drop sentinel utility (используется в `preset_expand.go` и legacy `applyCustomRules`)
 
 ## Phase 6 — UI: Rules tab refactor
 
-- [ ] `ui/configurator/models/rule_state.go` (модификация)
-  - [ ] Заменить `RuleState{Rule: TemplateSelectableRule, Enabled, SelectedOutbound}` на новый `Rule{Kind, Ref, ID, Enabled, Body}` (typed body)
-  - [ ] Adapter методы для legacy callsite'ов (на переходный период)
-- [ ] `ui/configurator/tabs/rules_tab.go` (модификация)
-  - [ ] Tile rendering для всех 3 kind'ов
-  - [ ] Summary preset-ref: non-default varsValues
-  - [ ] Summary inline: match-resume
-  - [ ] Summary srs: `· srs` marker + download кнопка
-  - [ ] Broken preset marker `⚠ Broken preset`
-- [ ] `ui/configurator/dialogs/edit_preset_rule_dialog.go` (новый)
-  - [ ] Универсальный vars renderer по type
-  - [ ] outbound picker
-  - [ ] dns_server grouped picker (3 секции) или whitelist
-  - [ ] enum dropdown с {title, value}
-  - [ ] bool checkbox с if/if_or зависимостями (live show/hide зависимых vars)
-  - [ ] text/number entry
-  - [ ] Preview секция (показывает emit'нутые fragments)
-  - [ ] Broken preset: warning баннер + Delete only
-- [ ] `ui/configurator/dialogs/add_rule_dialog.go` (модификация)
-  - [ ] Удалить legacy selectable_rule import path
-  - [ ] Только для inline/srs создания
-- [ ] `ui/configurator/tabs/library_rules_dialog.go` (модификация)
-  - [ ] "Add to Rules" создаёт preset-ref `{kind: "preset", ref, body: {vars: {}}}`
-  - [ ] Disabled state если ref уже в state.rules[]
+- [x] `ui/configurator/models/preset_ref_state.go` (NEW) — PresetRefState
+- [x] `ui/configurator/models/preset_ref_sync.go` (NEW) — Sync UI ↔ v6
+- [x] `ui/configurator/models/wizard_model.go` — `PresetRefs` + `DNSTemplateOverrides` поля
+- [x] `ui/configurator/models/rule_slot.go` (NEW) — Unified `RuleSlot` ordered list (custom + preset-refs одной колонкой) + `RuleOrder`
+- [x] `ui/configurator/presentation/preset_ref_helpers.go` (NEW)
+- [x] `ui/configurator/presentation/presenter_state.go` — Save пишет state.RulesV6/DNSV6, Load восстанавливает model.PresetRefs/DNSTemplateOverrides
+- [x] `ui/configurator/tabs/library_rules_dialog.go` — Library показывает обе секции (SelectableRules + Presets), Add создаёт preset-ref
+- [x] `ui/configurator/tabs/rules_unified_rows.go` (NEW) — preset-ref tile с lock icon, enable/disable, vars edit dialog, SRS cloud download button. **Заменяет** старый `preset_ref_rows.go` (объединение в один список с `RuleSlot`).
+- [x] `ui/configurator/tabs/preset_ref_edit_dialog.go` (NEW) — showEditPresetRefDialog: универсальный rendering form по PresetVar.Type, broken preset handling, Convert to user rule
+- [x] `ui/configurator/tabs/preset_ref_convert.go` (NEW) — convertPresetRefToUserRules helper
+- [x] `ui/configurator/tabs/preset_ref_srs.go` (NEW) — SRS cloud download для bundled rule_set
+- [x] `ui/configurator/dialogs/add_rule_dialog.go` — 5 NewCheck заменены на `widget.NewRadioGroup` (Rule Type radio) + conditional domain mode / match-by-path rows
 
 ## Phase 7 — UI: DNS tab refactor
 
-- [ ] `ui/configurator/business/dns_resolve.go` (новый)
-  - [ ] `ResolveDNSServers(template, state, activePresets) [](tag, source, effectiveEnabled, raw)` — для UI
-  - [ ] `effectiveEnabledForTemplate(tag, state) bool` — override resolver
-- [ ] `ui/configurator/tabs/dns_tab.go` (модификация)
-  - [ ] Секция "Default DNS servers (from template)" — checkbox per template-сервер
-  - [ ] `(overridden)` marker если значение != default_enabled
-  - [ ] Секция "From active presets (read-only)" — bundled DNS-серверы
-  - [ ] Секция "Extra servers (user-defined)" — `state.dns.extra_servers[]`
-  - [ ] "Extra rules" JSON editor — `state.dns.extra_rules[]`
-- [ ] Checkbox handler пишет в `state.dns.template_servers[tag].enabled`
+- [x] `ui/configurator/business/wizard_dns.go` — `DNSEnabledTagOptions` для server picker'ов
+- [x] `ui/configurator/business/preset_bundled_dns.go` (NEW) — resolver bundled DNS-серверов от active preset-ref'ов
+- [x] `ui/configurator/tabs/dns_tab.go`:
+  - [x] DNS tab moved **после** Rules tab
+  - [x] Layout: serversHeader → serversScroll → strategyAndCacheRow → rulesLabel → bundledRulesBox → userRulesBox → rulesButtons → finalAndResolverRow
+  - [x] Legacy `rulesBlock` MultiLineEntry скрыт из UI (`_ = rulesBlock`); состояние читается/пишется через row-list
+  - [x] Checkbox handler `setDNSServerEnabledAt` пишет в `model.DNSTemplateOverrides[tag] = enabled` + legacy DNSServers
+  - [x] `[+ Add Rule]` + spacer + `[View All DNS Rules]` кнопки под user rules
+- [x] `ui/configurator/tabs/dns_user_rules.go` (NEW):
+  - [x] Row-list user-defined DNS rules (заменяет JSON MultiLineEntry)
+  - [x] `[+ Add Rule]` → отдельное fyne window 500×600 с Form/JSON tabs, radio SRS/Inline, server picker
+  - [x] `[View All DNS Rules]` popup — compiled bundled+user preview (RichText JSON, read-only)
+  - [x] dnsRuleSummary helper для строкового описания
+- [x] `ui/configurator/tabs/dns_preset_bundled.go` (NEW):
+  - [x] Read-only rows для bundled DNS servers + DNS rules от active preset-ref'ов
+  - [x] 🔒 lock icon в позиции checkbox'а (через `lockLeading()` placeholder)
+  - [x] Single-line title `<preset-label> (<tag>)` + tooltip с деталями
+  - [x] `[View JSON]` button открывает RichTextFromMarkdown popup
+  - [x] Italic-стиль для help-текста (вместо серого LowImportance)
 
 ## Phase 8 — Content + cleanup + docs
 
-- [ ] `bin/wizard_template.json`:
-  - [ ] Добавить `presets[]` секцию с private-ips-direct, ru-direct (real-world), block-ads
-  - [ ] Удалить `route.rule_set[]` (rule_set'ы переехали в preset'ы)
-  - [ ] `dns_options.servers[].enabled` → `default_enabled`
-  - [ ] Удалить `dns_options.rules[]` (теперь только из presets/extras)
-  - [ ] Удалить `selectable_rules[]` если все мигрированы в `presets[]`
-- [ ] `core/template/loader.go`:
-  - [ ] Deprecated handling старой `selectable_rules[]` (parse но warning) — для legacy template'ов в кеше
-- [ ] `docs/RELEASE_PROCESS.md`:
-  - [ ] §5.2 bump RequiredTemplateRef теперь критично — preset content distributed via pin
-- [ ] `docs/ARCHITECTURE.md`:
-  - [ ] Раздел "SPEC 053 — Preset bundles"
-- [ ] `docs/release_notes/upcoming.md`:
-  - [ ] SPEC 053 entry (EN + RU): thin-ref пресеты, parametrized DNS, conditional fragments
-- [ ] `SPECS/053-F-N-PRESET_BUNDLES/IMPLEMENTATION_REPORT.md`:
-  - [ ] Final implementation report
-- [ ] Rename SPEC dir: `053-F-N-` → `053-F-C-`
-- [ ] CI: `go build ./... && go test ./...` зелёные
+- [x] `bin/wizard_template.json`:
+  - [x] Добавлена `presets[]` секция с 6 preset'ами (private-ips-direct, local-lan-domains, bittorrent-direct, block-ads, ru-direct-preset, ru-inside)
+  - [x] ru-direct: 5 vars (out, use_dns_override, dns_server select=local, dns_ip с 10 IP options, geoip_enabled), 3 rule_set, 3 dns_servers (yandex_udp/doh/dot c if=use_dns_override), 3 rule refs + 2 dns_rule refs
+- [x] `internal/locale/en.json` + 9 локалей: новые ключи `wizard.dns.section_from_active_presets`, `wizard.rules.button_convert_to_user`, `wizard.rules.dialog_edit_rule_title`, `wizard.shared.button_save`, `wizard.add_rule.domain_mode_label`; rename `tab_raw` "Raw" → "JSON"
+- [x] `docs/release_notes/upcoming.md` — SPEC 053 entry (EN + RU)
+- [x] `SPECS/053-F-N-PRESET_BUNDLES/IMPLEMENTATION_REPORT.md`
+- [ ] `docs/ARCHITECTURE.md` — Раздел "SPEC 053 — Preset bundles" (TODO)
+- [ ] `docs/RELEASE_PROCESS.md` §5.2 — заметка про bump RequiredTemplateRef критично для distribution preset content (TODO, low priority)
+- [ ] Rename SPEC dir: `053-F-N-` → `053-F-C-` (после QA-теста)
+
+## Misc fixes shipped в той же серии
+
+- [x] `ui/clash_api_tab.go` — guard `onLoadAndRefreshProxies` за `IsRunning()`, чтобы не показывать "Clash API disabled" popup при закрытии Configurator
+- [x] SPEC 054 created: `SPECS/054-B-N-XRAY_JSON_PREVIEW_NODES_BLOAT/SPEC.md` — найденный bug в Xray JSON-array subscription parser'е (preview_nodes раздувают state.json)
 
 ## Out of scope (отдельные SPEC'и в будущем)
 
-- [ ] **SPEC 054 PRESET_IMPORT_EXPORT** — JSON import/export пользовательских пресетов
-- [ ] **SPEC 055 LIVE_VARS_RECONFIGURE** — изменение varsValues без полного reconfigure sing-box (требует sing-box runtime API)
-- [ ] **SPEC 056 PRESET_DIAGNOSTICS_UI** — debug view раскрытого preset'а с expand trace
+- [ ] **SPEC 055 PRESET_IMPORT_EXPORT** — JSON import/export пользовательских пресетов
+- [ ] **SPEC 056 LIVE_VARS_RECONFIGURE** — изменение varsValues без полного reconfigure sing-box (требует sing-box runtime API)
+- [ ] **SPEC 057 PRESET_DIAGNOSTICS_UI** — debug view раскрытого preset'а с expand trace
+- [ ] **More var types** — `process_name` / `package_name` picker'ы из running apps
+- [ ] **Per-platform presets** — `platforms[]` поле в Preset (analog `TemplateSelectableRule.Platforms`)
