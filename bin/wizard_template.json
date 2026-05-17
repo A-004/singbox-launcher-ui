@@ -584,7 +584,7 @@
     {
       "id": "ru-blocked",
       "label": "Russian blocked resources",
-      "description": "Detour resources blocked in Russia (geoip-ru-blocked + community list) through proxy selector.",
+      "description": "Detour resources blocked in Russia (geoip-ru-blocked + community list) through proxy selector. Also adds an !RU filter to proxy-out/auto-proxy-out so traffic doesn't accidentally exit through a Russian proxy — that would hit the same blocks you're trying to escape.",
       "vars": [
         { "name": "out", "type": "outbound", "default": "proxy-out", "title": "Outbound" }
       ],
@@ -593,6 +593,10 @@
           "url": "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geoip/geoip-ru-blocked.srs" },
         { "tag": "community", "type": "remote", "format": "binary",
           "url": "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geoip/geoip-ru-blocked-community.srs" }
+      ],
+      "outbounds": [
+        { "mode": "update", "tag": "proxy-out",      "filters": { "tag": "!/(🇷🇺)/i" } },
+        { "mode": "update", "tag": "auto-proxy-out", "filters": { "tag": "!/(🇷🇺)/i" } }
       ],
       "rule": { "rule_set": ["main", "community"], "network": ["tcp", "udp"], "outbound": "@out" }
     },
