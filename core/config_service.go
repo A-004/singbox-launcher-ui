@@ -694,8 +694,16 @@ func refreshOneSubscriptionSource(src *state.Source, defaults state.Defaults, su
 	merged.LastErrorMsg = ""
 	merged.HTTPStatusCode = res.HTTPStatus
 	merged.RawBodyBytes = res.RawBodyBytes
-	merged.PreviewNodes = extractPreviewNodes(res.Body, 50)
-	merged.NodesCountFetched = countURIs(res.Body)
+	// SPEC 054: для Xray JSON array подписок line-based extractPreviewNodes
+	// раздувал preview_nodes в 50 раз (одна "line" = весь JSON body ~1MB).
+	// Сначала пробуем формат-aware path через xray JSON parser; fallback на
+	// line-based для base64/text-line подписок.
+	if subscription.IsXrayJSONArrayBody(string(res.Body)) {
+		merged.PreviewNodes, merged.NodesCountFetched = extractXrayJSONPreviewNodes(res.Body, 50)
+	} else {
+		merged.PreviewNodes = extractPreviewNodes(res.Body, 50)
+		merged.NodesCountFetched = countURIs(res.Body)
+	}
 
 	effectiveMax := src.MaxNodes
 	if effectiveMax == 0 {
@@ -805,6 +813,43 @@ func (svc *ConfigService) RefreshSingleSubscription(sourceID string) (*state.Sou
 		}
 	}
 	return src, nil
+}
+
+// extractXrayJSONPreviewNodes — SPEC 054. Для Xray JSON array подписок:
+// парсит body через subscription.ParseNodesFromXrayJSONArray и эмитит первые
+// `limit` нод в URI-like формате `<scheme>://<server>:<port>#<tag>`.
+//
+// Возвращает (previewNodes, totalCount). totalCount — реальное количество
+// нод в JSON array (для meta.nodes_count_fetched).
+//
+// На parse-error → возвращает (nil, 0) — caller должен решить fallback (но
+// caller сначала вызывает IsXrayJSONArrayBody, так что path должен совпадать).
+func extractXrayJSONPreviewNodes(body []byte, limit int) ([]string, int) {
+	nodes, err := subscription.ParseNodesFromXrayJSONArray(string(body), nil)
+	if err != nil {
+		debuglog.WarnLog("extractXrayJSONPreviewNodes: parse failed: %v", err)
+		return nil, 0
+	}
+	total := len(nodes)
+	if total == 0 {
+		return nil, 0
+	}
+	n := limit
+	if n > total {
+		n = total
+	}
+	out := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		node := nodes[i]
+		if node == nil {
+			continue
+		}
+		// URI-like preview: `<scheme>://<server>:<port>#<tag>` (~50-150 байт).
+		// Server/Port дают связь с реальной нодой, tag — human-readable label.
+		// UUID/Flow намеренно не включаем — это секреты, в preview не место.
+		out = append(out, fmt.Sprintf("%s://%s:%d#%s", node.Scheme, node.Server, node.Port, node.Tag))
+	}
+	return out, total
 }
 
 // extractPreviewNodes — первые `limit` URI-like строк из decoded body.
