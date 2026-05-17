@@ -164,8 +164,15 @@ func buildSinglePresetRefRow(
 	var srsBtn *ttwidget.Button
 	enableOnSRSSuccess := false
 
+	// Создаём checkbox БЕЗ OnChanged, потом ставим Checked напрямую через
+	// field (не SetChecked — он триггерит OnChanged когда value меняется),
+	// потом назначаем OnChanged. Без этой осторожности initial рендер
+	// enabled-preset'а триггерил бы callback → MarkAsChanged → (для preset'ов
+	// с outbounds) refreshRulesTabFromPresenter → новый checkbox → infinite loop.
 	var enableCh *widget.Check
-	enableCh = widget.NewCheck("", func(on bool) {
+	enableCh = widget.NewCheck("", nil)
+	enableCh.Checked = pr.Enabled
+	enableCh.OnChanged = func(on bool) {
 		if on && len(srsEntries) > 0 && model.ExecDir != "" &&
 			!services.AllSRSDownloadedForEntries(model.ExecDir, srsEntries) {
 			if srsBtn != nil {
@@ -197,8 +204,7 @@ func buildSinglePresetRefRow(
 		if tplPreset != nil && len(tplPreset.Outbounds) > 0 {
 			refreshRulesTabFromPresenter(presenter, showAddRuleDialog)
 		}
-	})
-	enableCh.SetChecked(pr.Enabled)
+	}
 	setTooltip(enableCh, locale.T("wizard.rules.tooltip_rule_enabled"))
 	if brokenRef {
 		enableCh.Disable()
