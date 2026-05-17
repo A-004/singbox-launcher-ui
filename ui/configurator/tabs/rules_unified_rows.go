@@ -143,15 +143,21 @@ func buildSinglePresetRefRow(
 		if !seen && currentVal != "" {
 			options = append([]string{currentVal}, options...)
 		}
-		outSel = fynewidget.NewHoverForwardSelect(options, func(value string) {
+		// Тот же anti-loop приём что у checkbox'а: создаём с nil callback,
+		// ставим Selected напрямую (не SetSelected — он триггерит OnChanged
+		// когда value меняется), потом назначаем OnChanged. Без этого initial
+		// render каждого preset-ряда триггерил бы MarkAsChanged + (для presetов
+		// с outbounds) refreshRulesTabFromPresenter → rebuild → infinite cascade.
+		outSel = fynewidget.NewHoverForwardSelect(options, nil, rowGetter)
+		outSel.Selected = currentVal
+		outSel.OnChanged = func(value string) {
 			if pr.Vars == nil {
 				pr.Vars = make(map[string]string)
 			}
 			pr.Vars[soloOutVar.Name] = value
 			model.TemplatePreviewNeedsUpdate = true
 			presenter.MarkAsChanged()
-		}, rowGetter)
-		outSel.SetSelected(currentVal)
+		}
 	}
 
 	// SRS download-on-enable flow (тот же паттерн что в rules_tab.go::332-360
