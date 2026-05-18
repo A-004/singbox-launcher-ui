@@ -204,6 +204,16 @@ func buildSinglePresetRefRow(
 		// enable toggle (renderPresetBundledDNSRows пропускает !pr.Enabled).
 		// Без RefreshDNSListAndSelects юзер видит stale entries в DNS tab.
 		presenter.RefreshDNSListAndSelects()
+		// SPEC 056: если preset имеет outbounds[] с mode=add — toggle добавляет/
+		// удаляет available outbound-теги. Custom rule outbound dropdowns +
+		// final outbound select видят это через RefreshOutboundOptions; inline
+		// preset-ref selects других rows подхватятся через rebuild Rules tab.
+		// Anti-loop защита: enableCh создан с nil OnChanged и Checked.Field
+		// напрямую (см. ниже в коде), так что rebuild не триггерит каскадно.
+		if presetHasAddOutbounds(tplPreset) {
+			presenter.RefreshOutboundOptions()
+			refreshRulesTabFromPresenter(presenter, showAddRuleDialog)
+		}
 	}
 	setTooltip(enableCh, locale.T("wizard.rules.tooltip_rule_enabled"))
 	if brokenRef {
@@ -344,6 +354,30 @@ func makePresetSRSButton(
 		})
 	}
 	return btn
+}
+
+// presetHasAddOutbounds — true если preset имеет хотя бы один outbounds[]
+// entry с mode="add" (или mode="" → дефолт add). mode="update" игнорируется
+// (он не вводит новых tag'ов в available-outbounds set).
+//
+// SPEC 056: используется при toggle preset-ref enable/disable, чтобы решить
+// — нужен ли full Rules tab rebuild + RefreshOutboundOptions. При false →
+// preset влияет только на route rule (через ExpandPreset) → достаточно
+// уже выполненных MarkAsChanged + TemplatePreviewNeedsUpdate.
+func presetHasAddOutbounds(tpl *wizardtemplate.Preset) bool {
+	if tpl == nil {
+		return false
+	}
+	for _, ob := range tpl.Outbounds {
+		mode := ob.Mode
+		if mode == "" {
+			mode = "add"
+		}
+		if mode == "add" {
+			return true
+		}
+	}
+	return false
 }
 
 // presetTileLabel — текст для tile preset-ref'а: label + non-default vars summary.
