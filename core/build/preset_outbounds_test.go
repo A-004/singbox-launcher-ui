@@ -159,12 +159,15 @@ func TestMergePresetsIntoOutbounds_Add(t *testing.T) {
 }
 
 func TestMergePresetsIntoOutbounds_UpdateFilters(t *testing.T) {
-	base := []byte(`[{"tag":"proxy-out","type":"selector","options":{"default":"x"}}]`)
+	// proxy-out has existing outbounds list; preset update filters !RU regex
+	// should drop RU-tagged entries from outbounds. filters field itself must
+	// NOT appear in final (sing-box 1.12+ rejects unknown field).
+	base := []byte(`[{"tag":"proxy-out","type":"selector","options":{"default":"x"},"outbounds":["a-EU","b-🇷🇺-RU","c-US"]}]`)
 	ctx := PresetMergeContext{
 		Presets: []template.Preset{
 			{ID: "ru-inside", Outbounds: []template.PresetOutbound{
 				{Mode: "update", Tag: "proxy-out",
-					Filters: map[string]interface{}{"tag": "!/RU/i"}},
+					Filters: map[string]interface{}{"tag": "!/🇷🇺/i"}},
 			}},
 		},
 		RulesV6: []v6.Rule{
@@ -179,20 +182,28 @@ func TestMergePresetsIntoOutbounds_UpdateFilters(t *testing.T) {
 		t.Fatalf("expected 1 outbound, got %d", len(arr))
 	}
 	po := arr[0]
-	// options.default preserved
+	if _, has := po["filters"]; has {
+		t.Errorf("filters field MUST be stripped after resolve; got: %+v", po)
+	}
 	opts := po["options"].(map[string]interface{})
 	if opts["default"] != "x" {
 		t.Errorf("options.default lost: %+v", opts)
 	}
-	// filters added
-	f := po["filters"].(map[string]interface{})
-	if f["tag"] != "!/RU/i" {
-		t.Errorf("filters not applied: %+v", f)
+	outs, _ := po["outbounds"].([]interface{})
+	got := make([]string, 0, len(outs))
+	for _, x := range outs {
+		got = append(got, x.(string))
+	}
+	want := []string{"a-EU", "c-US"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("outbounds after !RU filter: got %v, want %v", got, want)
 	}
 }
 
 func TestMergePresetsIntoOutbounds_UpdateAddOutboundsUnion(t *testing.T) {
-	base := []byte(`[{"tag":"proxy-out","type":"selector","addOutbounds":["a","b"]}]`)
+	// addOutbounds in patch should append to target.outbounds (not stay as
+	// separate addOutbounds field — sing-box doesn't understand it).
+	base := []byte(`[{"tag":"proxy-out","type":"selector","outbounds":["a","b"]}]`)
 	ctx := PresetMergeContext{
 		Presets: []template.Preset{
 			{ID: "p1", Outbounds: []template.PresetOutbound{
@@ -207,12 +218,15 @@ func TestMergePresetsIntoOutbounds_UpdateAddOutboundsUnion(t *testing.T) {
 	out, _ := MergePresetsIntoOutbounds(base, ctx)
 	var arr []map[string]interface{}
 	json.Unmarshal(out, &arr)
-	add, _ := arr[0]["addOutbounds"].([]interface{})
-	got := make([]string, 0, len(add))
-	for _, x := range add {
+	if _, has := arr[0]["addOutbounds"]; has {
+		t.Errorf("addOutbounds field MUST be stripped after merge; got: %+v", arr[0])
+	}
+	outs, _ := arr[0]["outbounds"].([]interface{})
+	got := make([]string, 0, len(outs))
+	for _, x := range outs {
 		got = append(got, x.(string))
 	}
-	want := []string{"a", "b", "c"}
+	want := []string{"a", "b", "c"} // existing + addOutbounds (union)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("union expected %v, got %v", want, got)
 	}
@@ -352,23 +366,30 @@ func TestApplyPresetUpdatesToGeneratedOutbounds_PatchesFilters(t *testing.T) {
 				Body: mustMarshal(t, v6.PresetBody{})},
 		},
 	}
+	// Filter !/RU/i applied to existing outbounds ["a", "b"] — both match
+	// (neither contains "RU"), so both should remain. filters field MUST be
+	// stripped after resolution (sing-box 1.12+ unknown field).
+	cache[0] = "\t{\"tag\":\"proxy-out\",\"type\":\"selector\",\"outbounds\":[\"a-EU\",\"b-RU\",\"c-US\"]},"
 	out := ApplyPresetUpdatesToGeneratedOutbounds(cache, ctx)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(out))
 	}
-	// First entry должен теперь содержать filters !RU + сохранить outbounds list.
 	var m map[string]interface{}
 	clean := strings.TrimRight(strings.TrimSpace(out[0]), ",")
 	if err := json.Unmarshal([]byte(clean), &m); err != nil {
 		t.Fatalf("parse patched: %v", err)
 	}
-	f, _ := m["filters"].(map[string]interface{})
-	if f["tag"] != "!/RU/i" {
-		t.Errorf("filters not applied: %+v", m)
+	if _, has := m["filters"]; has {
+		t.Errorf("filters field MUST be stripped after resolve: %+v", m)
 	}
 	outs, _ := m["outbounds"].([]interface{})
-	if len(outs) != 2 || outs[0] != "a" || outs[1] != "b" {
-		t.Errorf("outbounds list lost: %+v", outs)
+	got := make([]string, 0, len(outs))
+	for _, x := range outs {
+		got = append(got, x.(string))
+	}
+	want := []string{"a-EU", "c-US"} // b-RU dropped by !/RU/i
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("filtered outbounds: got %v, want %v", got, want)
 	}
 	// Second entry (direct-out) — без изменений.
 	if !strings.Contains(out[1], "\"direct\"") {

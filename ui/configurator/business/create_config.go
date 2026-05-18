@@ -128,6 +128,7 @@ func BuildPreviewConfig(model *wizardmodels.WizardModel) (string, error) {
 		DNS:            dnsV6,
 		SrsCachedPaths: build.CollectSrsCachedPaths(rulesV6, model.ExecDir),
 		ExecDir:        model.ExecDir,
+		AllNodeTags:    collectAllNodeTagsFromCacheLocal(ctx.Cache),
 	}
 
 	res, err := build.BuildConfig(ctx)
@@ -135,6 +136,25 @@ func BuildPreviewConfig(model *wizardmodels.WizardModel) (string, error) {
 		return "", err
 	}
 	return string(res.ConfigJSON), nil
+}
+
+// collectAllNodeTagsFromCacheLocal — same as core/config_service.go counterpart,
+// дубль чтоб не тянуть core/config_service в business package.
+func collectAllNodeTagsFromCacheLocal(cache *build.ParsedCache) []string {
+	if cache == nil || len(cache.Outbounds) == 0 {
+		return nil
+	}
+	tags := make([]string, 0, len(cache.Outbounds))
+	for _, raw := range cache.Outbounds {
+		var m map[string]interface{}
+		if json.Unmarshal(raw, &m) != nil {
+			continue
+		}
+		if t, ok := m["tag"].(string); ok && t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return tags
 }
 
 // inMemoryCacheFromModel конвертит model.GeneratedOutbounds/.GeneratedEndpoints

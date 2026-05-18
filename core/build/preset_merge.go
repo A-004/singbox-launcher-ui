@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 
 	"singbox-launcher/core/template"
@@ -183,6 +184,14 @@ type PresetMergeContext struct {
 	// Используется для materialization template-серверов с применением
 	// effective_enabled (от state.dns.template_servers).
 	TemplateDNSDefaults []TemplateDNSServer
+
+	// AllNodeTags — список всех outbound-тегов из ctx.Cache (subscription
+	// nodes + parser-generated groups). Используется для резолва
+	// `filters`/`addOutbounds` в preset.outbounds entries с mode=add —
+	// без этого pool'а ru VPN 🇷🇺 (или похожий filter-based selector от
+	// preset'а) не сможет получить outbound list и эмитит пустой selector.
+	// nil → пропускаем filter-resolution (preview без cache).
+	AllNodeTags []string
 }
 
 // MergePresetsIntoRoute — append'ит preset-ref + user inline/srs fragments
@@ -731,6 +740,12 @@ func MergePresetsIntoOutbounds(outboundsRaw json.RawMessage, ctx PresetMergeCont
 					debuglog.WarnLog("preset merge outbounds: preset %q add tag %q already exists (first-wins, this add ignored)", preset.ID, ob.Tag)
 					continue
 				}
+				// Resolve filters/addOutbounds → outbounds list (launcher-only
+				// fields, sing-box rejects). Если pool пустой (ctx.AllNodeTags
+				// nil — preview без parsing'а) — оставляем filters в body как
+				// дебаг marker (sing-box check всё равно ругнётся, но юзер
+				// увидит источник).
+				resolveAddFiltersIntoOutbounds(ob.Body, ctx.AllNodeTags)
 				emitted[ob.Tag] = ob.Body
 				order = append(order, ob.Tag)
 			case "update":
@@ -758,14 +773,17 @@ func MergePresetsIntoOutbounds(outboundsRaw json.RawMessage, ctx PresetMergeCont
 	return out, nil
 }
 
-// applyOutboundUpdate патчит target по правилам SPEC 055 (in-place mutation):
+// applyOutboundUpdate патчит target по правилам SPEC 055 (in-place mutation).
 //
-//	filters       → replace whole map
-//	addOutbounds  → union (append unique)
+//	filters       → resolve против target.outbounds: фильтруем существующий
+//	                список tag'ов через matchTagPattern, оставляем только
+//	                подходящие. `filters` поле в emit НЕ попадает (sing-box
+//	                1.12+ rejects unknown field).
+//	addOutbounds  → append tag'и к target.outbounds (union). `addOutbounds`
+//	                поле в emit НЕ попадает (тоже launcher-only).
 //	options.*     → replace per-field только тех что заданы в patch
-//	wizard.*      → replace per-field
-//	type          → drop (запрещено менять)
-//	tag           → drop (нельзя переименовать)
+//	wizard.*      → ignored (launcher-only metadata)
+//	type, tag     → drop (запрещено менять)
 //	comment       → replace
 //	прочие        → replace whole field
 func applyOutboundUpdate(target, patch map[string]interface{}, presetID string) {
@@ -774,9 +792,21 @@ func applyOutboundUpdate(target, patch map[string]interface{}, presetID string) 
 		case "tag", "type":
 			// Запрещено менять — пропускаем. Type already dropped at expand time.
 		case "filters":
-			target["filters"] = v
+			// Resolve filter против target.outbounds — фильтруем existing tags.
+			filterMap, ok := v.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			pool := outboundsListAsStrings(target["outbounds"])
+			filtered := applyTagFiltersToPool(pool, filterMap)
+			target["outbounds"] = stringSliceToInterfaces(filtered)
+			// Note: НЕ ставим target["filters"] — sing-box не понимает.
 		case "addOutbounds":
-			target["addOutbounds"] = unionStringList(target["addOutbounds"], v)
+			// Append tags to target.outbounds (union). НЕ keep addOutbounds field.
+			pool := outboundsListAsStrings(target["outbounds"])
+			patchList := interfaceListAsStrings(v)
+			merged := unionTagLists(pool, patchList)
+			target["outbounds"] = stringSliceToInterfaces(merged)
 		case "options":
 			patchMap, _ := v.(map[string]interface{})
 			tgtMap, _ := target["options"].(map[string]interface{})
@@ -788,19 +818,156 @@ func applyOutboundUpdate(target, patch map[string]interface{}, presetID string) 
 			}
 			target["options"] = tgtMap
 		case "wizard":
-			patchMap, _ := v.(map[string]interface{})
-			tgtMap, _ := target["wizard"].(map[string]interface{})
-			if tgtMap == nil {
-				tgtMap = map[string]interface{}{}
-			}
-			for pk, pv := range patchMap {
-				tgtMap[pk] = pv
-			}
-			target["wizard"] = tgtMap
+			// wizard.* — launcher metadata; не emit'им в финальный config.
+			// (раньше делали wizard.* merge per-field — но это поле тоже
+			// launcher-only и sing-box его не trips потому что оно
+			// игнорировалось при парсинге parser_config; теперь когда
+			// preset.outbounds эмитятся напрямую — нужно скипать).
 		default:
 			target[k] = v
 		}
 	}
+}
+
+// outboundsListAsStrings извлекает []string из target["outbounds"] (значение
+// формата []interface{} в JSON-decoded map). Не-string элементы пропускаются.
+func outboundsListAsStrings(v interface{}) []string {
+	arr, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, x := range arr {
+		if s, ok := x.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// interfaceListAsStrings — то же что outboundsListAsStrings но для []string
+// который тоже мог попасть как []interface{} в patch body.
+func interfaceListAsStrings(v interface{}) []string {
+	if ss, ok := v.([]string); ok {
+		return ss
+	}
+	return outboundsListAsStrings(v)
+}
+
+// stringSliceToInterfaces — обратное преобразование, для записи в map.
+func stringSliceToInterfaces(ss []string) []interface{} {
+	out := make([]interface{}, len(ss))
+	for i, s := range ss {
+		out[i] = s
+	}
+	return out
+}
+
+// unionTagLists — concat existing + add без дубликатов, preserving order.
+func unionTagLists(existing, add []string) []string {
+	seen := make(map[string]bool, len(existing)+len(add))
+	out := make([]string, 0, len(existing)+len(add))
+	for _, s := range existing {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	for _, s := range add {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+// resolveAddFiltersIntoOutbounds — для preset.outbounds mode=add body:
+// конвертирует launcher-only fields `filters` + `addOutbounds` в нативный
+// sing-box `outbounds: [...]` array путём резолва против allTags pool'а.
+// Затем стрипает `filters`/`addOutbounds` из body — sing-box их не понимает.
+//
+// Если pool пустой (preview / cold start) — стрипает поля без резолва
+// (selector получит пустой outbounds list, но sing-box хоть запустится).
+func resolveAddFiltersIntoOutbounds(body map[string]interface{}, allTags []string) {
+	if body == nil {
+		return
+	}
+	resolved := outboundsListAsStrings(body["outbounds"])
+	// Filter pool через filters → matched tags.
+	if filterRaw, has := body["filters"]; has {
+		if filterMap, ok := filterRaw.(map[string]interface{}); ok && len(allTags) > 0 {
+			matched := applyTagFiltersToPool(allTags, filterMap)
+			resolved = unionTagLists(resolved, matched)
+		}
+		delete(body, "filters")
+	}
+	// addOutbounds — литералы, append.
+	if addRaw, has := body["addOutbounds"]; has {
+		add := interfaceListAsStrings(addRaw)
+		resolved = unionTagLists(resolved, add)
+		delete(body, "addOutbounds")
+	}
+	if len(resolved) > 0 {
+		body["outbounds"] = stringSliceToInterfaces(resolved)
+	}
+}
+
+// applyTagFiltersToPool — фильтрует pool tag'ов через filter map (`{field:
+// pattern}`). Pattern syntax: literal, !literal, /regex/i, !/regex/i —
+// тот же synthax что в core/config/outbound_filter.go::matchesPattern. AND
+// между фильтрами в map.
+//
+// Имена полей: 'tag' — единственное супportable поле здесь (выпрашиваем
+// только string tag, не структуру ParsedNode).
+func applyTagFiltersToPool(pool []string, filter map[string]interface{}) []string {
+	if len(pool) == 0 || len(filter) == 0 {
+		return pool
+	}
+	tagPattern, _ := filter["tag"].(string)
+	if tagPattern == "" {
+		return pool
+	}
+	out := make([]string, 0, len(pool))
+	for _, t := range pool {
+		if matchPresetTagPattern(t, tagPattern) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// matchPresetTagPattern — копия логики core/config/outbound_filter.go::matchesPattern
+// для preset.outbounds emit pipeline (избегаем import cycle core/build → core/config).
+func matchPresetTagPattern(value, pattern string) bool {
+	// Negation literal: !literal
+	if strings.HasPrefix(pattern, "!") && !strings.HasPrefix(pattern, "!/") {
+		return value != strings.TrimPrefix(pattern, "!")
+	}
+	// Negation regex: !/regex/i
+	if strings.HasPrefix(pattern, "!/") && strings.HasSuffix(pattern, "/i") {
+		regexStr := strings.TrimPrefix(pattern, "!/")
+		regexStr = strings.TrimSuffix(regexStr, "/i")
+		re, err := regexp.Compile("(?i)" + regexStr)
+		if err != nil {
+			return false
+		}
+		return !re.MatchString(value)
+	}
+	// Regex: /regex/i
+	if strings.HasPrefix(pattern, "/") && strings.HasSuffix(pattern, "/i") {
+		regexStr := strings.TrimPrefix(pattern, "/")
+		regexStr = strings.TrimSuffix(regexStr, "/i")
+		re, err := regexp.Compile("(?i)" + regexStr)
+		if err != nil {
+			return false
+		}
+		return re.MatchString(value)
+	}
+	// Literal match
+	return value == pattern
 }
 
 // unionStringList объединяет existing []string и patch []string без дубликатов,
