@@ -168,7 +168,146 @@ func validatePreset(p *Preset, globalVars map[string]bool) ([]PresetWarning, boo
 		warns = append(warns, ws...)
 	}
 
+	// preset.outbounds[] (SPEC 056) — нормализация Mode, валидация Tag/Type
+	// уникальности и if/if_or ссылок. Невалидные entries stripped, preset
+	// остаётся (loader-level — не roundtrip-failure).
+	if ws := validatePresetOutbounds(p); len(ws) > 0 {
+		warns = append(warns, ws...)
+	}
+
 	return warns, true
+}
+
+// validatePresetOutbounds — нормализует Mode, валидирует Tag/Type, уникальность
+// тегов и if/if_or ссылки. Невалидные entries удаляются (strip), preset
+// остаётся. SKIP preset'а через outbounds не делается — фича опциональная,
+// лучше потерять одну entry чем целый preset.
+func validatePresetOutbounds(p *Preset) []PresetWarning {
+	if len(p.Outbounds) == 0 {
+		return nil
+	}
+	var warns []PresetWarning
+
+	allVars := make(map[string]bool, len(p.Vars))
+	boolVars := make(map[string]bool, len(p.Vars))
+	for _, v := range p.Vars {
+		allVars[v.Name] = true
+		if v.Type == "bool" {
+			boolVars[v.Name] = true
+		}
+	}
+
+	seenTags := make(map[string]bool, len(p.Outbounds))
+	kept := make([]PresetOutbound, 0, len(p.Outbounds))
+
+	for i := range p.Outbounds {
+		ob := p.Outbounds[i]
+
+		// 1) Normalize/validate mode (empty → "add"; unknown → strip entry).
+		switch ob.Mode {
+		case "":
+			ob.Mode = "add"
+		case "add", "update":
+			// ok
+		default:
+			warns = append(warns, PresetWarning{
+				PresetID: p.ID,
+				Message: fmt.Sprintf(
+					"outbounds[%d] (tag=%q): unknown mode %q (must be \"add\" or \"update\"; entry stripped)",
+					i, ob.Tag, ob.Mode,
+				),
+				Action: "strip",
+			})
+			continue
+		}
+
+		// 2) Tag required.
+		if strings.TrimSpace(ob.Tag) == "" {
+			warns = append(warns, PresetWarning{
+				PresetID: p.ID,
+				Message:  fmt.Sprintf("outbounds[%d]: empty tag (entry stripped)", i),
+				Action:   "strip",
+			})
+			continue
+		}
+
+		// 3) Per-mode field validation.
+		switch ob.Mode {
+		case "add":
+			if strings.TrimSpace(ob.Type) == "" {
+				warns = append(warns, PresetWarning{
+					PresetID: p.ID,
+					Message: fmt.Sprintf(
+						"outbounds[%d] (tag=%q): mode=add requires non-empty type (entry stripped)",
+						i, ob.Tag,
+					),
+					Action: "strip",
+				})
+				continue
+			}
+		case "update":
+			if strings.TrimSpace(ob.Type) != "" {
+				warns = append(warns, PresetWarning{
+					PresetID: p.ID,
+					Message: fmt.Sprintf(
+						"outbounds[%d] (tag=%q): mode=update cannot change type (field %q dropped)",
+						i, ob.Tag, ob.Type,
+					),
+					Action: "strip",
+				})
+				ob.Type = ""
+			}
+		}
+
+		// 4) if/if_or references → bool vars того же preset'а.
+		checkRefs := func(loc string, list []string) {
+			for _, ref := range list {
+				if !allVars[ref] {
+					warns = append(warns, PresetWarning{
+						PresetID: p.ID,
+						Message: fmt.Sprintf(
+							"outbounds[%d] (tag=%q) %s reference %q is unknown var (kept but won't match)",
+							i, ob.Tag, loc, ref,
+						),
+						Action: "strip",
+					})
+				} else if !boolVars[ref] {
+					warns = append(warns, PresetWarning{
+						PresetID: p.ID,
+						Message: fmt.Sprintf(
+							"outbounds[%d] (tag=%q) %s reference %q is not a bool var (kept but won't match)",
+							i, ob.Tag, loc, ref,
+						),
+						Action: "strip",
+					})
+				}
+			}
+		}
+		checkRefs("if", ob.If)
+		checkRefs("if_or", ob.IfOr)
+
+		// 5) Tag uniqueness in preset (warning + skip dup, keep first).
+		// Намеренно общая семантика для add+update: дважды update на одно tag
+		// в одном preset'е — почти всегда копипаст-баг (для multi-preset
+		// update это нормально и обрабатывается RuleOrder'ом в Phase 3).
+		if seenTags[ob.Tag] {
+			warns = append(warns, PresetWarning{
+				PresetID: p.ID,
+				Message: fmt.Sprintf(
+					"outbounds[%d]: duplicate tag %q in same preset (keep first, drop later)",
+					i, ob.Tag,
+				),
+				Action: "strip",
+			})
+			continue
+		}
+		seenTags[ob.Tag] = true
+
+		kept = append(kept, ob)
+	}
+
+	p.Outbounds = kept
+	return warns
 }
 
 // validateVarsNames — уникальность имён + collision с globals.

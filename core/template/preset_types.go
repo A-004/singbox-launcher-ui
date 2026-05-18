@@ -57,6 +57,89 @@ type Preset struct {
 
 	// DNSRule — DNS-rule preset'а. Опциональный, имеет свой `if`.
 	DNSRule map[string]interface{} `json:"dns_rule,omitempty"`
+
+	// Outbounds — preset.outbounds[] (SPEC 056). Каждая entry — либо
+	// mode="add" (новый outbound, требует Type), либо mode="update"
+	// (патч existing outbound по Tag). См. PresetOutbound + comments в
+	// core/build/preset_outbounds.go::ApplyPresetOutboundsToParserConfig.
+	//
+	// Архитектурно — это parser-format (зеркалит configtypes.OutboundConfig).
+	// Build pipeline применяет их **до** native outbound generator'а:
+	// типизированный pre-patch parserCfg.ParserConfig.Outbounds[] →
+	// нативный generator сам делает options-flatten, filters/addOutbounds
+	// резолв, comment-prefix. Никаких post-merge JSON-патчей или strip'ов.
+	Outbounds []PresetOutbound `json:"outbounds,omitempty"`
+}
+
+// PresetOutbound — entry preset.outbounds[] (SPEC 056).
+//
+// Поля Tag/Type/Options/Filters/AddOutbounds/PreferredDefault/Comment/Wizard
+// зеркалят configtypes.OutboundConfig — намеренно, чтобы Phase 3 expand
+// просто маппил поля в OutboundConfig без преобразований.
+//
+// Контрол-поля Mode/If/IfOr НЕ попадают в финальный config (используются
+// только на этапе ExpandPresetOutbounds для разрешения какой outbound
+// эмитить и в каком режиме).
+type PresetOutbound struct {
+	// Mode — режим применения:
+	//   ""       → "add" (default)
+	//   "add"    → добавить новый outbound (нужен Type)
+	//   "update" → патчить existing outbound по Tag (Type запрещён)
+	// Unknown values → loader strip'ает entry с warning.
+	Mode string `json:"mode,omitempty"`
+
+	// Tag — идентификатор outbound'а.
+	//   mode=add    → tag нового outbound'а; collision с globals или earlier
+	//                 preset → first wins + warning (identical body → silent skip)
+	//   mode=update → tag existing outbound в parser_config.outbounds[];
+	//                 если не найден → warning, no-op (no auto-create)
+	// Required для обоих режимов.
+	Tag string `json:"tag"`
+
+	// Type — sing-box outbound type (selector / urltest / direct / shadowsocks / …).
+	// Required для mode=add. Для mode=update запрещён (Tag/Type immutable —
+	// loader strip'ает поле и warning'ает; в Phase 3 expand тоже dropped).
+	Type string `json:"type,omitempty"`
+
+	// Options — sing-box outbound options (nested object).
+	// mode=add: установлен как есть.
+	// mode=update: per-field replace в target.Options (нет глубокого merge —
+	// заменяются только заданные ключи top-level).
+	Options map[string]interface{} `json:"options,omitempty"`
+
+	// Filters — фильтр нод для selector/urltest (native pipeline разруливает
+	// в config.outbounds[].outbounds[] через filterNodesForSelector).
+	// mode=add: установлен как есть.
+	// mode=update: replace целиком (если задан).
+	Filters map[string]interface{} `json:"filters,omitempty"`
+
+	// AddOutbounds — дополнительные outbound-tag'и, добавляются к фильтру.
+	// mode=add: установлен как есть.
+	// mode=update: union с target.AddOutbounds (preserve order, dedupe).
+	AddOutbounds []string `json:"addOutbounds,omitempty"`
+
+	// PreferredDefault — приоритетный default для selector'а
+	// (см. configtypes.OutboundConfig).
+	// mode=add: установлен.
+	// mode=update: replace целиком.
+	PreferredDefault map[string]interface{} `json:"preferredDefault,omitempty"`
+
+	// Comment — // prefix перед JSON entry (native pipeline печатает как
+	// "// %s\n"). Не JSON-поле в финале.
+	// mode=update: replace если задан непустой.
+	Comment string `json:"comment,omitempty"`
+
+	// Wizard — UI metadata (hide / required). Не идёт в финальный config
+	// (native pipeline стрипает). Можно задать в preset для override
+	// template wizard-настроек при mode=update.
+	Wizard interface{} `json:"wizard,omitempty"`
+
+	// If — entry активна iff ВСЕ перечисленные bool vars true.
+	// Семантика идентична PresetVar.If (cascade через vars_resolve.go).
+	If []string `json:"if,omitempty"`
+
+	// IfOr — активна iff ХОТЯ БЫ ОДНА из перечисленных bool vars true.
+	IfOr []string `json:"if_or,omitempty"`
 }
 
 // PresetVar — типизированная переменная preset'а.
