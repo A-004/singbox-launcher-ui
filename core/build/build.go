@@ -294,12 +294,15 @@ func buildSection(ctx BuildContext, key string, raw json.RawMessage) (string, er
 		}
 		// SPEC 055: clean dangling outbound refs (user/preset rule ссылается
 		// на outbound который не существует в финальных config.outbounds[]).
-		// Fallback на route.final; если final пустой → drop rule. Срабатывает
-		// только когда в state есть active preset-ref'ы (real SPEC 055
-		// scenario — preset мог removed/disabled, оставив dangling refs).
-		// Без preset'ов — legacy behavior без cleanup'а (тест-фикстуры могут
-		// ссылаться на outbound'ы не присутствующие в template).
-		if hasAnyV6Rule(ctx.Preset.RulesV6) && len(ctx.allOutboundTags) > 0 {
+		// Fallback на route.final; если final пустой → drop rule.
+		//
+		// Скип в preview (ForPreview=true): preview cache (model.GeneratedOutbounds)
+		// может не содержать всех parser_config.outbounds[] групп (зависит от
+		// того когда parsing завершился). False-positive cleanup испортит
+		// preview output (показ "vpn ② → proxy-out" хотя vpn ② валиден).
+		// Save-путь (forPreview=false) использует свежий cache от core
+		// pipeline — там cleanup безопасен.
+		if !ctx.ForPreview && hasAnyV6Rule(ctx.Preset.RulesV6) && len(ctx.allOutboundTags) > 0 {
 			merged, _ = CleanDanglingOutboundsInRouteRules(merged, ctx.allOutboundTags, ctx.Route.FinalOutbound)
 		}
 		return FormatSectionJSON(merged, 2)
