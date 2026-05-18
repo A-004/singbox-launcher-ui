@@ -184,8 +184,14 @@ func buildOverviewTab(presenter *wizardpresentation.WizardPresenter, sourceIndex
 				// MultiLineEntry без Disable() — на macOS Fyne disabled-text
 				// рендерится цветом фона (невидимо). Оставляем editable
 				// на ввод, но без OnChanged — мутации игнорятся.
+				//
+				// TextWrapBreak (не Off): compact JSON подписки (типа Xray)
+				// идут одной длинной строкой без переводов, без wrap'а уходят
+				// далеко вправо за viewport — юзер видит чёрное пустое поле.
+				// Break wrap'ает по любому символу (JSON без пробелов
+				// нормально не break'ается по слову).
 				bodyEntry := widget.NewMultiLineEntry()
-				bodyEntry.Wrapping = fyne.TextWrapOff
+				bodyEntry.Wrapping = fyne.TextWrapBreak
 				bodyEntry.SetText(string(display))
 				bodyEntry.OnChanged = func(s string) {
 					if s != string(display) {
