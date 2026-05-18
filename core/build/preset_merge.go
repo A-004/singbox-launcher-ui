@@ -474,10 +474,11 @@ func ApplyPresetUpdatesToGeneratedOutbounds(cacheStrings []string, ctx PresetMer
 		for _, p := range patches {
 			applyOutboundUpdate(m, p.body, p.presetID)
 		}
-		// Финальная зачистка launcher-only полей. applyOutboundUpdate уже
-		// consumed filters/addOutbounds (резолвил в outbounds list), но
-		// belt-and-suspenders на случай, если что-то затекло.
-		finalStripLauncherFields(m)
+		// Финальная транформация parser → sing-box: flatten options.*,
+		// drop launcher-only fields. applyOutboundUpdate уже консумировал
+		// filters/addOutbounds в outbounds list (или там belt-and-suspenders
+		// strip отработает на остатках).
+		OutboundParserToSingbox(m)
 		patched, err := json.Marshal(m)
 		if err != nil {
 			out[i] = raw
@@ -771,7 +772,7 @@ func MergePresetsIntoOutbounds(outboundsRaw json.RawMessage, ctx PresetMergeCont
 	result := make([]interface{}, 0, len(order))
 	for _, tag := range order {
 		if m, ok := emitted[tag]; ok {
-			finalStripLauncherFields(m)
+			OutboundParserToSingbox(m)
 			result = append(result, m)
 		}
 	}

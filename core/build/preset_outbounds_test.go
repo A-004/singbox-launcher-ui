@@ -185,9 +185,11 @@ func TestMergePresetsIntoOutbounds_UpdateFilters(t *testing.T) {
 	if _, has := po["filters"]; has {
 		t.Errorf("filters field MUST be stripped after resolve; got: %+v", po)
 	}
-	opts := po["options"].(map[string]interface{})
-	if opts["default"] != "x" {
-		t.Errorf("options.default lost: %+v", opts)
+	if _, has := po["options"]; has {
+		t.Errorf("options field MUST be flattened to top-level; got: %+v", po)
+	}
+	if po["default"] != "x" {
+		t.Errorf("options.default not flattened to top-level: %+v", po)
 	}
 	outs, _ := po["outbounds"].([]interface{})
 	got := make([]string, 0, len(outs))
