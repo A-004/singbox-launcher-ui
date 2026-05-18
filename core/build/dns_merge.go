@@ -68,6 +68,17 @@ func MergeDNSSection(templateDNS json.RawMessage, cfg DNSConfig) (json.RawMessag
 		if !dnsServerEnabled(m) {
 			continue
 		}
+		// SPEC 053 v6 path: legacyDNSOptionsFromV6 эмитит template_servers
+		// override'ы как `{tag, enabled}` без type/server — это маркеры для UI
+		// (показать template-сервер с tag X как enabled/disabled), а не полные
+		// server-config'и. Они НЕ должны попасть в финальный sing-box config
+		// (без type sing-box 1.12+ считает это legacy DNS format и валит).
+		// Реальные template servers с полной body уже в template dns.servers
+		// (dnsObj['servers'] до этого merge'а), их фильтрация по enabled
+		// override'у — задача MergePresetsIntoDNS.
+		if !dnsServerHasBody(m) {
+			continue
+		}
 		servers = append(servers, stripDNSWizardOnlyFields(m))
 	}
 	dnsObj["servers"] = servers
@@ -95,6 +106,18 @@ func MergeDNSSection(templateDNS json.RawMessage, cfg DNSConfig) (json.RawMessag
 		dnsObj["independent_cache"] = *cfg.IndependentCache
 	}
 	return json.Marshal(dnsObj)
+}
+
+// dnsServerHasBody — true, если у DNS-server entry есть хотя бы одно поле
+// определяющее реальный сервер (type / server / address). Иначе это
+// wizard-only override marker (`{tag, enabled}`), не для emit в config.
+func dnsServerHasBody(m map[string]interface{}) bool {
+	for _, k := range []string{"type", "server", "address"} {
+		if v, ok := m[k]; ok && v != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // dnsServerEnabled — true, если у объекта DNS-сервера wizard-only поле
