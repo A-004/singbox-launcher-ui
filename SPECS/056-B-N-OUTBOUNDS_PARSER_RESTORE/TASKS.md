@@ -132,7 +132,7 @@
 - [x] `bin/wizard_template.json::presets[ru-inside].outbounds` — `mode=update` + `mode=add` для `ru VPN 🇷🇺`, default `@out` = `ru VPN 🇷🇺`
 - [x] `bin/wizard_template.json::presets[russian].outbounds` — `mode=update` + `mode=add` ru VPN
 - [x] `bin/wizard_template.json::presets[ru-blocked].outbounds` — только `mode=update` !RU
-- [ ] `internal/constants/constants.go::RequiredTemplateRef` — bump при коммите (SHA коммита с этим template)
+- [x] `internal/constants/constants.go::RequiredTemplateRef` — bump на `ee6e8e4` (template migration commit)
 - [ ] Manual QA 1–5 из PLAN.md Phase 7 — **после Phases 2–4** (pre-patch в коде)
 
 ## Phase 8 — Golden fixtures + docs
