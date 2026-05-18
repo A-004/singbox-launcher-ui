@@ -49,19 +49,6 @@ type PresetFragments struct {
 	// DNSServers — bundled DNS-серверы, отфильтрованные через @dns_server var.
 	// Только tag'и упомянутые в emit'ах попадают сюда. С префиксом `<preset_id>:`.
 	DNSServers []map[string]interface{}
-
-	// Outbounds — preset-emitted outbound entries (SPEC 055). Каждый имеет
-	// Mode и Body (готовый JSON-ready outbound dict после @var-substitution).
-	// Tag НЕ префиксуется preset_id — outbound'ы это user-facing global namespace.
-	// Mode семантика обрабатывается в MergePresetsIntoOutbounds (core/build/preset_merge.go).
-	Outbounds []ExpandedOutbound
-}
-
-// ExpandedOutbound — один outbound после ExpandPreset.
-type ExpandedOutbound struct {
-	Mode string                 // "add" | "update"
-	Tag  string                 // user-facing tag (без preset prefix)
-	Body map[string]interface{} // готовый dict — все @var resolved, if/if_or/mode уже stripped
 }
 
 // ExpandWarning — non-fatal предупреждение expansion engine'а.
@@ -132,7 +119,9 @@ func ExpandPreset(preset *template.Preset, userVars map[string]string) (*PresetF
 		if m == nil {
 			continue
 		}
-		stripWizardOnlyFields(m)
+		// Strip if/if_or (уже резолвлено) — не нужны в sing-box config.
+		delete(m, "if")
+		delete(m, "if_or")
 		// Prefix tag.
 		localTag, _ := m["tag"].(string)
 		prefixed := preset.ID + TagSeparator + localTag
@@ -156,7 +145,8 @@ func ExpandPreset(preset *template.Preset, userVars map[string]string) (*PresetF
 					return nil, warnings, false
 				}
 				m, _ := substituted.(map[string]interface{})
-				stripWizardOnlyFields(m)
+				delete(m, "if")
+				delete(m, "if_or")
 				// Rewrite rule_set refs: local → prefixed, filter dangling.
 				rewriteRuleSetRefs(m, preset.ID, emittedTags)
 				// Apply outbound sentinels (reject/drop) — shared util с UI.
@@ -188,7 +178,8 @@ func ExpandPreset(preset *template.Preset, userVars map[string]string) (*PresetF
 					return nil, warnings, false
 				}
 				m, _ := substituted.(map[string]interface{})
-				stripWizardOnlyFields(m)
+				delete(m, "if")
+				delete(m, "if_or")
 				rewriteRuleSetRefs(m, preset.ID, emittedTags)
 				// dns_rule.server — может быть локальный bundled tag (без префикса), prefix'ить.
 				if srv, ok := m["server"].(string); ok && srv != "" && !strings.HasPrefix(srv, "@") {
@@ -231,7 +222,10 @@ func ExpandPreset(preset *template.Preset, userVars map[string]string) (*PresetF
 			return nil, warnings, false
 		}
 		m, _ := substituted.(map[string]interface{})
-		stripWizardOnlyFields(m)
+		// Strip UI-only / control fields.
+		delete(m, "if")
+		delete(m, "if_or")
+		delete(m, "title")
 		// Strip detour=direct-out (sing-box резолвит без forwarding).
 		if det, ok := m["detour"].(string); ok && det == "direct-out" {
 			delete(m, "detour")
@@ -242,65 +236,7 @@ func ExpandPreset(preset *template.Preset, userVars map[string]string) (*PresetF
 		frags.DNSServers = append(frags.DNSServers, m)
 	}
 
-	// === 7. SPEC 055: outbounds ===
-	// Tag НЕ префиксуется (user-facing). Substitute @var в options/filters/addOutbounds.
-	// Для mode=update drop'аем поле type (loader уже warned). Strip if/if_or/mode из Body.
-	for _, ob := range preset.Outbounds {
-		if !evalIf(ob.If, ob.IfOr, varsMap) {
-			continue
-		}
-		raw, err := deepCopy(ob)
-		if err != nil {
-			warnings = append(warnings, ExpandWarning{preset.ID,
-				fmt.Sprintf("deep copy outbound %q: %v", ob.Tag, err)})
-			continue
-		}
-		substituted, ok := substituteAny(raw, varsMap)
-		if !ok {
-			warnings = append(warnings, ExpandWarning{preset.ID,
-				fmt.Sprintf("unresolved @var in outbound %q", ob.Tag)})
-			return nil, warnings, false
-		}
-		m, _ := substituted.(map[string]interface{})
-		mode, _ := m["mode"].(string)
-		if mode == "" {
-			mode = "add"
-		}
-		tag, _ := m["tag"].(string)
-		if tag == "" {
-			continue
-		}
-		// Strip wizard-only + preset-control fields. NB: для outbound body
-		// `wizard` блок легитимный (хранит wizard.required marker) — для
-		// эмита в финальный config он не нужен, но parser_config layer
-		// его обрабатывает раньше. На preset-emit пути просто стрипаем.
-		stripWizardOnlyFields(m)
-		delete(m, "mode") // preset-control, не для финального config
-		// Для mode=update запретить смену type — loader уже warned.
-		if mode == "update" {
-			delete(m, "type")
-		}
-		frags.Outbounds = append(frags.Outbounds, ExpandedOutbound{
-			Mode: mode,
-			Tag:  tag,
-			Body: m,
-		})
-	}
-
 	return frags, warnings, true
-}
-
-// stripWizardOnlyFields — thin wrapper над общим SanitizeMap (см.
-// rules_pipeline.go). Оставлен для callsite'ов preset_expand.go;
-// семантика identical — все strip'ы делегируют в единую точку истины.
-func stripWizardOnlyFields(m map[string]interface{}) {
-	SanitizeMap(m)
-}
-
-// finalStripLauncherFields — wrapper над SanitizeMapFinal (post-merge pass:
-// strip launcher-only + filters/addOutbounds как safety-net).
-func finalStripLauncherFields(m map[string]interface{}) {
-	SanitizeMapFinal(m)
 }
 
 // filterActiveVars — оценивает if/if_or каждой var'ы. Возвращает set активных имён.

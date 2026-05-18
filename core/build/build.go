@@ -86,11 +86,6 @@ type BuildContext struct {
 	// и MergeDNSSection. Активируется когда RulesV6 содержит preset-ref'ы или
 	// DNS имеет template_servers/extra_servers/extra_rules. Иначе noop.
 	Preset PresetMergeContext
-
-	// allOutboundTags — internal, заполняется buildOrderedSections перед
-	// итерацией секций. Используется в route case для cleanDangling. Не
-	// настраивается извне — invariant: всегда вычисляется внутри BuildConfig.
-	allOutboundTags map[string]bool
 }
 
 // Result — итог сборки.
@@ -199,12 +194,6 @@ func effectiveConfig(td *template.TemplateData, vars map[string]string, res *Res
 // Для каждой секции — указанный обработчик из orchestrator-маппинга
 // (см. BuildConfig godoc); неизвестные ключи идут через `FormatSectionJSON`.
 func buildOrderedSections(ctx BuildContext, cfg map[string]json.RawMessage, order []string) ([]string, error) {
-	// SPEC 055: pre-compute all outbound tags для cleanDanglingOutboundRefInRule
-	// в route case. Включает template static outbounds (после preset merge) +
-	// dynamic cache subscription outbounds. Этот set заполняется ОДИН раз
-	// перед итерацией секций и пробрасывается через ctx.allOutboundTags.
-	ctx.allOutboundTags = collectAllOutboundTagsForBuild(cfg["outbounds"], ctx)
-
 	out := make([]string, 0, len(order))
 	for _, key := range order {
 		raw, ok := cfg[key]
@@ -220,62 +209,12 @@ func buildOrderedSections(ctx BuildContext, cfg map[string]json.RawMessage, orde
 	return out, nil
 }
 
-// collectAllOutboundTagsForBuild — union outbound tags from:
-//
-//  1. Template static outbounds (after preset.outbounds merge — mode=add appends
-//     to that list).
-//  2. Dynamic subscription outbounds from snapshot cache.
-//  3. `direct-out` always present (sing-box implicit).
-//
-// Используется для cleanDanglingOutboundRefInRule, чтобы знать какие
-// outbound-теги валидны для ссылок из route.rules.
-func collectAllOutboundTagsForBuild(templateOutboundsRaw json.RawMessage, ctx BuildContext) map[string]bool {
-	tags := make(map[string]bool)
-	tags["direct-out"] = true // sing-box implicit
-
-	// Template + preset.outbounds merge first.
-	merged, err := MergePresetsIntoOutbounds(templateOutboundsRaw, ctx.Preset)
-	if err == nil {
-		for k := range CollectOutboundTagsFromRaw(merged) {
-			tags[k] = true
-		}
-	}
-
-	// Dynamic cache (subscription parsed nodes).
-	if ctx.Cache != nil {
-		for _, raw := range ctx.Cache.Outbounds {
-			var m map[string]interface{}
-			if err := json.Unmarshal(raw, &m); err != nil {
-				continue
-			}
-			if t, ok := m["tag"].(string); ok && t != "" {
-				tags[t] = true
-			}
-		}
-	}
-	return tags
-}
-
 // buildSection — диспетчер для одной секции. Pure: state хранится только
 // внутри ctx (никаких side effects вне результата).
 func buildSection(ctx BuildContext, key string, raw json.RawMessage) (string, error) {
 	switch key {
 	case "outbounds":
-		// SPEC 055: apply preset.outbounds (add/update) BEFORE
-		// BuildOutboundsSection, чтобы они попали в final config.outbounds[]
-		// рядом с template static outbounds (после @ParserEND маркера).
-		merged := raw
-		if mergedOut, err := MergePresetsIntoOutbounds(raw, ctx.Preset); err == nil {
-			merged = mergedOut
-		}
-		// SPEC 055 phase 2: preset.outbounds mode=update также должны патчить
-		// **parser-generated** outbounds (proxy-out, auto-proxy-out, vpn ①,
-		// vpn ② etc — они приходят через ctx.Cache, не через templateOutbounds).
-		// Без этого update !RU filter из russian/ru-inside preset'а не доходит
-		// до глобального proxy-out — он эмитится парсером без preset-патчей.
-		cacheStrings := cacheOutboundsAsStrings(ctx.Cache)
-		cacheStrings = ApplyPresetUpdatesToGeneratedOutbounds(cacheStrings, ctx.Preset)
-		return BuildOutboundsSection(merged, cacheStrings, ctx.ForPreview, ctx.Stats)
+		return BuildOutboundsSection(raw, cacheOutboundsAsStrings(ctx.Cache), ctx.ForPreview, ctx.Stats)
 	case "endpoints":
 		return BuildEndpointsSection(raw, cacheEndpointsAsStrings(ctx.Cache), ctx.ForPreview, ctx.Stats)
 	case "dns":
@@ -298,19 +237,6 @@ func buildSection(ctx BuildContext, key string, raw json.RawMessage) (string, er
 		merged, err = MergePresetsIntoRoute(merged, ctx.Preset)
 		if err != nil {
 			return "", err
-		}
-		// SPEC 055: clean dangling outbound refs (user/preset rule ссылается
-		// на outbound который не существует в финальных config.outbounds[]).
-		// Fallback на route.final; если final пустой → drop rule.
-		//
-		// Скип в preview (ForPreview=true): preview cache (model.GeneratedOutbounds)
-		// может не содержать всех parser_config.outbounds[] групп (зависит от
-		// того когда parsing завершился). False-positive cleanup испортит
-		// preview output (показ "vpn ② → proxy-out" хотя vpn ② валиден).
-		// Save-путь (forPreview=false) использует свежий cache от core
-		// pipeline — там cleanup безопасен.
-		if !ctx.ForPreview && hasAnyV6Rule(ctx.Preset.RulesV6) && len(ctx.allOutboundTags) > 0 {
-			merged, _ = CleanDanglingOutboundsInRouteRules(merged, ctx.allOutboundTags, ctx.Route.FinalOutbound)
 		}
 		return FormatSectionJSON(merged, 2)
 	default:

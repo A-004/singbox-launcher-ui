@@ -135,14 +135,17 @@ func dnsServerEnabled(m map[string]interface{}) bool {
 	return b
 }
 
-// stripDNSWizardOnlyFields — wrapper над общим SanitizeMap.
-// Single source of truth для emit-cleanup — см. rules_pipeline.go::SanitizeMap.
+// stripDNSWizardOnlyFields убирает wizard-only ключи перед merge'ом в
+// финальный config.json: "description" (текст в UI) и "enabled" (UI-чекбокс).
+// sing-box их не понимает; не убирать → конфиг отвалится при `sing-box check`.
 func stripDNSWizardOnlyFields(m map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(m))
 	for k, v := range m {
+		if k == "description" || k == "enabled" {
+			continue
+		}
 		out[k] = v
 	}
-	SanitizeMap(out)
 	return out
 }
 

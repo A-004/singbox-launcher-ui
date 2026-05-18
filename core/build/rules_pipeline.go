@@ -297,130 +297,15 @@ func ParseTemplateDNSDefaults(servers []json.RawMessage) []TemplateDNSServer {
 	return out
 }
 
-// launcherOnlyEmitKeys — набор top-level ключей которые НЕ должны попадать
-// в финальный sing-box config. Точка истины для всех emit-путей (DNS server,
-// preset rule_set / rule / dns_rule / dns_server / outbound, template
-// dns_defaults). sing-box 1.12+ строгий decoder отвергает unknown fields,
-// поэтому даже невинная документация в `comment`/`description` валит запуск.
-//
-// Внутренние convention'ы:
-//   - Любой ключ с префиксом "_" считается launcher-private (см. SanitizeMap).
-//   - Конкретные ключи перечислены явно — некоторые также появляются в
-//     template-документации без подчёркивания.
-//
-// `filters` и `addOutbounds` НЕ в этом списке — они **inputs** для merge
-// функций (applyOutboundUpdate, resolveAddFiltersIntoOutbounds) которые
-// резолвят их в `outbounds` list и удаляют после consume. На final pass
-// merge'а есть отдельный safety-strip через SanitizeMapFinal.
-var launcherOnlyEmitKeys = map[string]struct{}{
-	"if":              {},
-	"if_or":           {},
-	"title":           {},
-	"description":     {}, // sing-box 1.12+ rejects
-	"comment":         {}, // sing-box 1.12+ rejects
-	"enabled":         {}, // top-level UI checkbox; tls.enabled etc во вложенных не затрагиваются
-	"wizard":          {}, // launcher metadata block (wizard.required etc)
-	"default_enabled": {}, // template default flag for UI
-}
-
-// SanitizeMap — единая точка очистки top-level map перед emit в sing-box
-// config. Удаляет известные launcher-only поля + любые `_*` ключи (внутренний
-// convention). In-place mutation.
-//
-// Используется во ВСЕХ emit путях: preset.outbounds/dns_servers/rule_set/rule/dns_rule,
-// template DNS defaults, MergeDNSSection, MergePresetsIntoOutbounds final pass.
-func SanitizeMap(m map[string]interface{}) {
-	if m == nil {
-		return
-	}
-	for k := range m {
-		if _, isLauncherOnly := launcherOnlyEmitKeys[k]; isLauncherOnly {
-			delete(m, k)
-			continue
-		}
-		if strings.HasPrefix(k, "_") {
-			delete(m, k)
-		}
-	}
-}
-
-// SanitizeMapFinal — расширенный strip для post-merge pass. Дополнительно
-// удаляет `filters` и `addOutbounds` (на случай если merge не сконсумировал
-// их в outbounds list, например preview без cache).
-func SanitizeMapFinal(m map[string]interface{}) {
-	SanitizeMap(m)
-	delete(m, "filters")
-	delete(m, "addOutbounds")
-}
-
-// OutboundParserToSingbox — полная трансформация **parser-format outbound entry**
-// в **sing-box-format outbound entry**.
-//
-// Parser format (то что пишут в template.parser_config.outbounds[] и в
-// preset.outbounds[]):
-//
-//	{
-//	  "tag": "...",
-//	  "type": "selector",
-//	  "options": {                          // launcher wrapper
-//	    "default": "...",
-//	    "interrupt_exist_connections": true,
-//	    "url": "...",                       // urltest
-//	    "interval": "...", "tolerance": ...
-//	  },
-//	  "filters": {...},                     // launcher-only → outbounds list
-//	  "addOutbounds": [...],                // launcher-only → outbounds list
-//	  "comment": "...", "wizard": {...}     // launcher-only docs
-//	}
-//
-// Sing-box format (то что валидно через `sing-box check`):
-//
-//	{
-//	  "tag": "...",
-//	  "type": "selector",
-//	  "default": "...",                    // flattened из options.*
-//	  "interrupt_exist_connections": true, // flattened
-//	  "outbounds": [...]                   // sole array source
-//	}
-//
-// Шаги:
-//  1. Flatten `options.*` → top-level (если конфликт с already-existing top-level
-//     ключом — top-level wins, preserve user intent at the outer layer).
-//  2. SanitizeMapFinal — drop launcher-only поля (options, filters, addOutbounds,
-//     comment, wizard, default_enabled, if/if_or, title, description, enabled +
-//     `_*` prefix).
-//
-// In-place. Tag/type/outbounds НЕ трогаются.
-//
-// Используется в final emit passes для preset.outbounds (mode=add) и для
-// applied updates (mode=update). Native parser_config path сам строит
-// sing-box JSON напрямую (см. outbound_generator.go::GenerateSelectorWithFilteredAddOutbounds),
-// не пользуется этой функцией.
-func OutboundParserToSingbox(m map[string]interface{}) {
-	if m == nil {
-		return
-	}
-	if optsRaw, has := m["options"]; has {
-		if opts, ok := optsRaw.(map[string]interface{}); ok {
-			for k, v := range opts {
-				if _, exists := m[k]; !exists {
-					m[k] = v
-				}
-			}
-		}
-		delete(m, "options")
-	}
-	SanitizeMapFinal(m)
-}
-
-// SanitizeServerForEmit — legacy wrapper. Возвращает копию с очищенными
-// ключами. Оставлен для совместимости с rules_pipeline emit; новые callsite'ы
-// используют SanitizeMap напрямую (in-place).
+// SanitizeServerForEmit — strip launcher-only keys из server map перед emit.
+// (Для future расширений — сейчас все strip'ы делаются в emitTemplateDNSDefaults.)
 func SanitizeServerForEmit(m map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(m))
 	for k, v := range m {
+		if k == "default_enabled" || k == "if" || k == "if_or" || strings.HasPrefix(k, "_") {
+			continue
+		}
 		out[k] = v
 	}
-	SanitizeMap(out)
 	return out
 }

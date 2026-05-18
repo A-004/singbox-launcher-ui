@@ -333,33 +333,11 @@ func (ac *AppController) buildContextFromState(s *state.State, cache *build.Pars
 		RulesV6:        s.RulesV6,
 		DNS:            s.DNSV6,
 		SrsCachedPaths: build.CollectSrsCachedPaths(s.RulesV6, ac.FileService.ExecDir),
-		AllNodeTags:    collectAllNodeTagsFromCache(cache),
 	}
 	if ac != nil && ac.FileService != nil {
 		ctx.Preset.ExecDir = ac.FileService.ExecDir
 	}
 	return ctx
-}
-
-// collectAllNodeTagsFromCache — собирает tag'и всех outbounds из parser cache
-// (subscription nodes + parser_config-generated groups). Используется для
-// резолва preset.outbounds filters/addOutbounds → outbounds list. Pool
-// должен совпадать с тем что получают global selectors типа proxy-out.
-func collectAllNodeTagsFromCache(cache *build.ParsedCache) []string {
-	if cache == nil || len(cache.Outbounds) == 0 {
-		return nil
-	}
-	tags := make([]string, 0, len(cache.Outbounds))
-	for _, raw := range cache.Outbounds {
-		var m map[string]interface{}
-		if json.Unmarshal(raw, &m) != nil {
-			continue
-		}
-		if t, ok := m["tag"].(string); ok && t != "" {
-			tags = append(tags, t)
-		}
-	}
-	return tags
 }
 
 // dnsConfigForUpdate — извлекает DNS-related данные из state в build.DNSConfig.
