@@ -173,32 +173,18 @@ func buildOverviewTab(presenter *wizardpresentation.WizardPresenter, sourceIndex
 		if execDir != "" {
 			subsDir := platform.GetSubscriptionsDir(execDir)
 			rawPath := filepath.Join(subsDir, src.ID+".raw")
-			// Partial read: вместо `os.ReadFile` всего файла (~1 MB для Xray JSON)
-			// + DecodeSubscriptionContent на нём (`json.Valid` + `Unmarshal` —
-			// ~100ms на MB) читаем только prefix `rawBodyMaxDisplay + 1`. Это:
-			//  - быстро (< 1ms даже на медленном диске);
-			//  - достаточно для рендера в Entry;
-			//  - +1 байт позволяет понять truncated (если файл больше).
-			// totalSize берём через os.Stat — для отображения "of N bytes".
+			// Read strategy зависит от размера файла:
+			//   - small (<= rawBodyFullReadLimit, типичный base64 / text-line) —
+			//     читаем целиком, DecodeSubscriptionContent декодирует base64
+			//     или возвращает body как есть (для JSON / plain URI).
+			//   - large (Xray JSON ~1 MB) — partial read, skip decode (тяжёлый
+			//     json.Valid+Unmarshal на МБ; для preview достаточно prefix).
+			// В обоих случаях finally truncate to rawBodyMaxDisplay.
 			tRead := time.Now()
-			display, totalSize, ok := readRawBodyPartial(rawPath, rawBodyMaxDisplay+1)
-			debuglog.DebugLog("buildOverviewTab: readRawBodyPartial took %v (size=%d, ok=%v)", time.Since(tRead), len(display), ok)
+			display, totalSize, ok := readRawBodySmart(rawPath, rawBodyMaxDisplay+1)
+			debuglog.DebugLog("buildOverviewTab: readRawBodySmart took %v (size=%d, total=%d, ok=%v)", time.Since(tRead), len(display), totalSize, ok)
 			if ok && len(display) > 0 {
 				body.Add(widget.NewSeparator())
-
-				// DecodeSubscriptionContent ТОЛЬКО если хвост base64 — попытка
-				// декодировать обрезанную base64 даст garbage. Для JSON / plain
-				// URI body показываем как есть.
-				// Эвристика: если первый non-whitespace == '[' или содержит '://' —
-				// уже decoded, не трогаем. Иначе пробуем base64 (только prefix).
-				trimmed := strings.TrimLeft(string(display), " \t\n\r")
-				looksDecoded := strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") ||
-					strings.Contains(trimmed[:minInt(len(trimmed), 1024)], "://")
-				if !looksDecoded {
-					if decoded, derr := subscription.DecodeSubscriptionContent(display); derr == nil && len(decoded) > 0 {
-						display = decoded
-					}
-				}
 
 				truncatedNote := ""
 				if totalSize > rawBodyMaxDisplay {
@@ -300,11 +286,22 @@ func kvRow(key, value string) fyne.CanvasObject {
 	return container.NewBorder(nil, nil, keyLabel, nil, valueLabel)
 }
 
-// readRawBodyPartial читает первые `maxBytes` байт файла + возвращает total
-// size через os.Stat. Не тащит всю мегабайтную body в память.
-// Возвращает (prefix, totalSize, true) на успех; (nil, 0, false) если файл
-// не существует / нечитаем.
-func readRawBodyPartial(path string, maxBytes int) ([]byte, int, bool) {
+// rawBodyFullReadLimit — лимит «маленького» файла. Файлы <= лимита читаются
+// целиком + декодируются нормально (base64/plain text). Файлы больше — partial
+// read только prefix (для Xray JSON 1 MB кейса — без декода).
+//
+// 256 KB покрывает типичные base64-encoded подписки (50-100 нод × ~300 байт ×
+// 4/3 base64 overhead = ~20 KB). Xray JSON редко меньше — обычно от 500 KB.
+const rawBodyFullReadLimit = 256 * 1024
+
+// readRawBodySmart выбирает стратегию по размеру файла:
+//   - file <= rawBodyFullReadLimit → read whole + DecodeSubscriptionContent
+//     (для base64 / plain text);
+//   - file >  rawBodyFullReadLimit → read first `displayPrefixBytes` без
+//     декода (для Xray JSON / огромных bodies).
+//
+// Возвращает (display-ready bytes, totalFileSize, ok).
+func readRawBodySmart(path string, displayPrefixBytes int) ([]byte, int, bool) {
 	stat, err := os.Stat(path)
 	if err != nil {
 		return nil, 0, false
@@ -313,28 +310,35 @@ func readRawBodyPartial(path string, maxBytes int) ([]byte, int, bool) {
 	if total == 0 {
 		return nil, 0, false
 	}
-	f, err := os.Open(path)
-	if err != nil {
+	if total <= rawBodyFullReadLimit {
+		// Small body: read all + decode normally.
+		full, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return nil, total, false
+		}
+		// Try decode (base64 / json-passthrough / plain text). Best-effort:
+		// если decode упал — отдаём raw.
+		if decoded, derr := subscription.DecodeSubscriptionContent(full); derr == nil && len(decoded) > 0 {
+			return decoded, total, true
+		}
+		return full, total, true
+	}
+	// Large body: read only prefix, no decode (предполагаем JSON / уже-decoded).
+	f, ferr := os.Open(path)
+	if ferr != nil {
 		return nil, total, false
 	}
 	defer f.Close()
-	readN := maxBytes
+	readN := displayPrefixBytes
 	if readN > total {
 		readN = total
 	}
 	buf := make([]byte, readN)
-	n, err := io.ReadFull(f, buf)
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+	n, rerr := io.ReadFull(f, buf)
+	if rerr != nil && rerr != io.ErrUnexpectedEOF && rerr != io.EOF {
 		return nil, total, false
 	}
 	return buf[:n], total, true
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // wrapLongLines вставляет '\n' каждые `every` символов в строки, длиннее
