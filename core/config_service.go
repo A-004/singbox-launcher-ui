@@ -347,15 +347,35 @@ func (ac *AppController) buildContextFromState(s *state.State, cache *build.Pars
 	// Если state.RulesV6 не пуст, MergePresetsIntoRoute берёт на себя весь emit
 	// (preset/inline/srs). Noop когда RulesV6 пуст (legacy v5-only flow).
 	ctx.Preset = build.PresetMergeContext{
-		Presets:        td.Presets,
-		RulesV6:        s.RulesV6,
-		DNS:            s.DNSV6,
-		SrsCachedPaths: build.CollectSrsCachedPaths(s.RulesV6, ac.FileService.ExecDir),
+		Presets:             td.Presets,
+		RulesV6:             s.RulesV6,
+		DNS:                 s.DNSV6,
+		SrsCachedPaths:      build.CollectSrsCachedPaths(s.RulesV6, ac.FileService.ExecDir),
+		TemplateDNSDefaults: parseTemplateDNSDefaultsFromTD(td),
 	}
 	if ac != nil && ac.FileService != nil {
 		ctx.Preset.ExecDir = ac.FileService.ExecDir
 	}
 	return ctx
+}
+
+// parseTemplateDNSDefaultsFromTD — извлекает dns_options.servers[] из template
+// и парсит в []build.TemplateDNSServer. Используется MergePresetsIntoDNS для
+// материализации DNS-библиотеки (без этого юзерский DNS tab override на
+// cloudflare_udp/google_doh/yandex_doh ничего не делает — server не в config).
+//
+// Возвращает nil если td nil / нет dns_options / парс не удался.
+func parseTemplateDNSDefaultsFromTD(td *template.TemplateData) []build.TemplateDNSServer {
+	if td == nil || len(td.DNSOptionsRaw) == 0 {
+		return nil
+	}
+	var dnsOpt struct {
+		Servers []json.RawMessage `json:"servers"`
+	}
+	if err := json.Unmarshal(td.DNSOptionsRaw, &dnsOpt); err != nil {
+		return nil
+	}
+	return build.ParseTemplateDNSDefaults(dnsOpt.Servers)
 }
 
 // dnsConfigForUpdate — извлекает DNS-related данные из state в build.DNSConfig.

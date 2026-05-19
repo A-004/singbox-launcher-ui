@@ -198,7 +198,8 @@ type TemplateDNSServer struct {
 }
 
 // emitTemplateDNSDefaults — фильтрует template-defined серверы по effective_enabled.
-// `default_enabled` и поле `if`/`if_or` strip'аются при emit.
+// Cleanup-fields идёт через единую stripDNSWizardOnlyFields (single source of truth):
+// description/enabled/title/if/if_or/default_enabled/_*.
 func emitTemplateDNSDefaults(
 	defaults []TemplateDNSServer,
 	overrides map[string]v6.TemplateServerOvr,
@@ -212,18 +213,12 @@ func emitTemplateDNSDefaults(
 		if !effective {
 			continue
 		}
-		copy := make(map[string]interface{}, len(d.Raw))
-		for k, v := range d.Raw {
-			if k == "default_enabled" || k == "if" || k == "if_or" {
-				continue
-			}
-			copy[k] = v
+		cleaned := stripDNSWizardOnlyFields(d.Raw)
+		// Ensure tag присутствует (stripDNSWizardOnlyFields tag не трогает).
+		if _, has := cleaned["tag"]; !has && d.Tag != "" {
+			cleaned["tag"] = d.Tag
 		}
-		// Ensure tag присутствует
-		if _, has := copy["tag"]; !has && d.Tag != "" {
-			copy["tag"] = d.Tag
-		}
-		out = append(out, copy)
+		out = append(out, cleaned)
 	}
 	return out
 }

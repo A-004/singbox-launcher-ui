@@ -27,6 +27,27 @@ import (
 	wizardtemplate "singbox-launcher/core/template"
 )
 
+// parsePreviewTemplateDNSDefaults — то же что core_service.parseTemplateDNSDefaultsFromTD,
+// продублировано здесь чтобы business не импортировал core (избегаем import cycle).
+// Используется BuildPreviewConfig: preview tab визарда должен показывать тот же
+// config, что Save/Rebuild — материализованную template DNS library из dns_options.
+//
+// Возвращает nil если td nil / нет dns_options / парс не удался — caller
+// (MergePresetsIntoDNS) тогда просто не материализует, остальные DNS-сервера
+// (template config.dns.servers + bundled + extras) работают как раньше.
+func parsePreviewTemplateDNSDefaults(td *wizardtemplate.TemplateData) []build.TemplateDNSServer {
+	if td == nil || len(td.DNSOptionsRaw) == 0 {
+		return nil
+	}
+	var dnsOpt struct {
+		Servers []json.RawMessage `json:"servers"`
+	}
+	if err := json.Unmarshal(td.DNSOptionsRaw, &dnsOpt); err != nil {
+		return nil
+	}
+	return build.ParseTemplateDNSDefaults(dnsOpt.Servers)
+}
+
 // extractTemplateDNSTagsLocal — выдаёт set template-defined DNS server tag'ов
 // из TemplateData.DNSOptionsRaw. Дубль логики из presentation/preset_ref_helpers.go,
 // чтобы не тянуть presentation в business package (avoid import cycle).
@@ -123,11 +144,12 @@ func BuildPreviewConfig(model *wizardmodels.WizardModel) (string, error) {
 		templateDNSTags,
 	)
 	ctx.Preset = build.PresetMergeContext{
-		Presets:        model.TemplateData.Presets,
-		RulesV6:        rulesV6,
-		DNS:            dnsV6,
-		SrsCachedPaths: build.CollectSrsCachedPaths(rulesV6, model.ExecDir),
-		ExecDir:        model.ExecDir,
+		Presets:             model.TemplateData.Presets,
+		RulesV6:             rulesV6,
+		DNS:                 dnsV6,
+		SrsCachedPaths:      build.CollectSrsCachedPaths(rulesV6, model.ExecDir),
+		ExecDir:             model.ExecDir,
+		TemplateDNSDefaults: parsePreviewTemplateDNSDefaults(model.TemplateData),
 	}
 
 	res, err := build.BuildConfig(ctx)

@@ -409,6 +409,26 @@ func MergePresetsIntoDNS(dnsRaw json.RawMessage, ctx PresetMergeContext) (json.R
 		}
 	}
 
+	// SPEC 056 follow-up: материализуем template DNS library (template.dns_options.
+	// servers[]) — без этого юзер не видит cloudflare_udp/google_doh/yandex_doh
+	// и т.д. в финальном config'е, даже если в DNS tab он их включил
+	// (state.dns.template_servers override'ы существуют, но без библиотеки
+	// серверов из template это бессмысленно).
+	//
+	// Filter: effective_enabled = override.Enabled OR (no override → DefaultEnabled).
+	// Dedup по tag — template config.dns.servers могут содержать тот же tag.
+	if len(ctx.TemplateDNSDefaults) > 0 {
+		emitted := emitTemplateDNSDefaults(ctx.TemplateDNSDefaults, ctx.DNS.TemplateServers)
+		for _, m := range emitted {
+			tag, _ := m["tag"].(string)
+			if tag == "" || emittedTags[tag] {
+				continue
+			}
+			servers = append(servers, m)
+			emittedTags[tag] = true
+		}
+	}
+
 	// Append bundled DNS-сервера от active presets.
 	// SPEC 056-pattern: ВСЕ added entries проходят через stripDNSWizardOnlyFields
 	// на копии. Native pipeline (sing-box) видит чистый JSON без launcher-only
