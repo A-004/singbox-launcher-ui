@@ -136,12 +136,29 @@ func dnsServerEnabled(m map[string]interface{}) bool {
 }
 
 // stripDNSWizardOnlyFields убирает wizard-only ключи перед merge'ом в
-// финальный config.json: "description" (текст в UI) и "enabled" (UI-чекбокс).
-// sing-box их не понимает; не убирать → конфиг отвалится при `sing-box check`.
+// финальный config.json: "description"/"enabled" (UI поля), "title"
+// (preset UI label), "if"/"if_or" (preset условия — уже резолвлены к моменту
+// эмита), "default_enabled" (template default), и любые ключи с префиксом "_"
+// (sing-box их отвергает strict-decoder'ом начиная с 1.12+).
+//
+// **Always returns a NEW map** — caller'у безопасно передавать оригинал из
+// state/template без боязни мутировать его (SPEC 056 pattern: immutable
+// inputs, defensive copies перед any emit).
+//
+// Используется во всех путях DNS server emit:
+//   - MergeDNSSection (legacy v5 cfg.Servers)
+//   - MergePresetsIntoDNS (preset bundled + state.DNS.ExtraServers)
+//
+// Single source of truth — если sing-box добавит ещё одно «unknown field»
+// замечание в будущем, патчим здесь, не в нескольких местах.
 func stripDNSWizardOnlyFields(m map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(m))
 	for k, v := range m {
-		if k == "description" || k == "enabled" {
+		switch k {
+		case "description", "enabled", "title", "if", "if_or", "default_enabled":
+			continue
+		}
+		if len(k) > 0 && k[0] == '_' {
 			continue
 		}
 		out[k] = v
