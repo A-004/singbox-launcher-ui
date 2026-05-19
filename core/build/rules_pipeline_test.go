@@ -132,7 +132,11 @@ func TestPipeline_DisabledPresetRef(t *testing.T) {
 	}
 }
 
-// TestPipeline_UserInline — kind=inline → headless rule_set + route rule.
+// TestPipeline_UserInline — kind=inline → ПРЯМОЕ route rule (без rule_set wrapper).
+// SPEC 056 follow-up: emit user inline match directly в route.rules[] — headless
+// rule_set type=inline отвергает connection-level match-поля (protocol/inbound/...),
+// route.rules[] принимает union всех типов. Каждое user inline уникально по tag —
+// reuse нет, обёртка лишь добавляет индирекцию.
 func TestPipeline_UserInline(t *testing.T) {
 	state := &v6.State{
 		Rules: []v6.Rule{makeTestRule(t, v6.RuleKindInline, "", "01JUSR1", true, `{
@@ -142,15 +146,22 @@ func TestPipeline_UserInline(t *testing.T) {
 		}`)},
 	}
 	result := BuildRulesAndDNS(nil, nil, state, nil)
-	if len(result.RouteRuleSet) != 1 || result.RouteRuleSet[0]["tag"] != "user:01JUSR1" {
-		t.Errorf("user inline rule_set: %+v", result.RouteRuleSet)
+	if len(result.RouteRuleSet) != 0 {
+		t.Errorf("user inline should NOT emit rule_set (direct route rule): %+v", result.RouteRuleSet)
 	}
 	if len(result.RouteRules) != 1 {
 		t.Fatalf("route rule count")
 	}
 	rr := result.RouteRules[0]
-	if rr["rule_set"] != "user:01JUSR1" || rr["outbound"] != "proxy-out" {
-		t.Errorf("route rule: %+v", rr)
+	if rr["outbound"] != "proxy-out" {
+		t.Errorf("expected outbound=proxy-out, got %+v", rr)
+	}
+	ds, ok := rr["domain_suffix"].([]interface{})
+	if !ok || len(ds) != 1 || ds[0] != "example.com" {
+		t.Errorf("expected match merged into route rule (domain_suffix=[example.com]), got %+v", rr)
+	}
+	if _, has := rr["rule_set"]; has {
+		t.Errorf("route rule should NOT have rule_set ref (direct emit), got %+v", rr)
 	}
 }
 
@@ -266,9 +277,10 @@ func TestPipeline_MixedKinds(t *testing.T) {
 	if len(result.RouteRules) != 3 {
 		t.Errorf("expected 3 route rules (preset + inline + srs), got %d: %+v", len(result.RouteRules), result.RouteRules)
 	}
-	// rule_set: 2 (inline + srs); preset не имеет rule_set
-	if len(result.RouteRuleSet) != 2 {
-		t.Errorf("expected 2 rule_sets, got %d", len(result.RouteRuleSet))
+	// rule_set: только SRS (inline теперь напрямую в route.rules, preset
+	// private-ips тоже без rule_set — match-only rule).
+	if len(result.RouteRuleSet) != 1 {
+		t.Errorf("expected 1 rule_set (srs only), got %d: %+v", len(result.RouteRuleSet), result.RouteRuleSet)
 	}
 }
 

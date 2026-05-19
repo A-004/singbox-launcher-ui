@@ -284,21 +284,25 @@ func MergePresetsIntoRoute(routeRaw json.RawMessage, ctx PresetMergeContext) (js
 				continue
 			}
 			ib := body.(*v6.InlineBody)
-			tag := "user:" + rule.ID
-			if !emittedTags[tag] {
-				match := ib.Match
-				if match == nil {
-					match = map[string]interface{}{}
-				}
-				rs := map[string]interface{}{
-					"tag":   tag,
-					"type":  "inline",
-					"rules": []interface{}{match},
-				}
-				ruleSets = append(ruleSets, rs)
-				emittedTags[tag] = true
+			// SPEC 056 follow-up: emit user inline match DIRECTLY в route.rules[],
+			// без обёртки в rule_set type=inline. Причина: sing-box headless
+			// rule_set принимает только connection-independent match-поля
+			// (domain/ip/port/network/process_*), но НЕ connection-level
+			// (protocol/inbound/outbound/action/...). User'ское правило
+			// {protocol: bittorrent, outbound: direct-out} крашилось на
+			// `route.rule_set[N].rules[0].protocol: unknown field`.
+			//
+			// Прямая эмиссия в route.rules[] поддерживает union всех match
+			// типов. Никакой потери функциональности — каждое user inline
+			// правило уникально по tag (user:<id>), reuse нет.
+			match := ib.Match
+			if match == nil {
+				match = map[string]interface{}{}
 			}
-			routeRule := map[string]interface{}{"rule_set": tag}
+			routeRule := make(map[string]interface{}, len(match)+1)
+			for k, v := range match {
+				routeRule[k] = v
+			}
 			routeRule = outboundutilApply(routeRule, ib.Outbound)
 			rules = append(rules, routeRule)
 		case v6.RuleKindSrs:

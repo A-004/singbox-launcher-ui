@@ -120,14 +120,15 @@ func BuildRulesAndDNS(
 				continue
 			}
 			ib := body.(*v6.InlineBody)
-			tag := "user:" + rule.ID
-			rs := map[string]interface{}{
-				"tag":   tag,
-				"type":  "inline",
-				"rules": []interface{}{normalizeMatch(ib.Match)},
+			// SPEC 056 follow-up: emit user inline match напрямую в route.rules[],
+			// без rule_set обёртки — sing-box headless rule_set отвергает
+			// connection-level match-поля (protocol/inbound/...). См.
+			// preset_merge.go::MergePresetsIntoRoute для полного объяснения.
+			match := normalizeMatch(ib.Match)
+			routeRule := make(map[string]interface{}, len(match)+1)
+			for k, v := range match {
+				routeRule[k] = v
 			}
-			mergeRuleSets(&result, ruleSetSeen, []map[string]interface{}{rs})
-			routeRule := map[string]interface{}{"rule_set": tag}
 			routeRule = outboundutil.ApplyOutboundToRule(routeRule, ib.Outbound)
 			result.RouteRules = append(result.RouteRules, routeRule)
 
