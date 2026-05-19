@@ -359,6 +359,28 @@ func (ac *AppController) buildContextFromState(s *state.State, cache *build.Pars
 	return ctx
 }
 
+// isV6DNSActive — true если state хранит DNS через v6 схему (RulesV6 непуст
+// ИЛИ DNSV6 содержит template_servers/extras). При false — legacy v5 путь
+// (через dns_options.servers/rules в legacy DNSOptions).
+//
+// Используется в dnsConfigForUpdate чтобы избежать double-emit'а: v6 extras
+// проходят через MergePresetsIntoDNS, легаси-копия в DNSOptions служит только
+// UI back-compat (state/load.go::legacyDNSOptionsFromV6).
+func isV6DNSActive(s *state.State) bool {
+	if s == nil {
+		return false
+	}
+	if len(s.RulesV6) > 0 {
+		return true
+	}
+	if len(s.DNSV6.TemplateServers) > 0 ||
+		len(s.DNSV6.ExtraServers) > 0 ||
+		len(s.DNSV6.ExtraRules) > 0 {
+		return true
+	}
+	return false
+}
+
 // parseTemplateDNSDefaultsFromTD — извлекает dns_options.servers[] из template
 // и парсит в []build.TemplateDNSServer. Используется MergePresetsIntoDNS для
 // материализации DNS-библиотеки (без этого юзерский DNS tab override на
@@ -381,17 +403,31 @@ func parseTemplateDNSDefaultsFromTD(td *template.TemplateData) []build.TemplateD
 // dnsConfigForUpdate — извлекает DNS-related данные из state в build.DNSConfig.
 // state.DNSOptions содержит servers/rules; final/strategy/independent_cache
 // исторически живут в state.Vars (dns_*) после миграции SPEC 032.
+//
+// SPEC 056 follow-up: когда state v6 (RulesV6 непуст или DNSV6 содержит
+// данные), Servers/Rules от legacy DNSOptions НЕ передаются — иначе они
+// материализуются ДВАЖДЫ:
+//   - MergeDNSSection эмитит их из cfg.Servers / cfg.RulesText
+//   - MergePresetsIntoDNS эмитит их ЖЕ из ctx.DNS.ExtraServers/ExtraRules
+//     (потому что legacyDNSOptionsFromV6 в state/load.go копирует extras в
+//     legacy view для UI back-compat, но v6-build pipeline уже видит их
+//     напрямую из state.DNSV6).
+// Скаляры (Final/Strategy/IndependentCache) остаются — они одинаковые в
+// обоих views, не дублируются ни одним из путей.
 func dnsConfigForUpdate(s *state.State) build.DNSConfig {
 	cfg := build.DNSConfig{}
 	if s.DNSOptions != nil {
-		cfg.Servers = s.DNSOptions.Servers
 		cfg.Final = s.DNSOptions.Final
 		cfg.Strategy = s.DNSOptions.Strategy
 		cfg.IndependentCache = s.DNSOptions.IndependentCache
-		if len(s.DNSOptions.Rules) > 0 {
-			raw, err := json.Marshal(map[string]interface{}{"rules": s.DNSOptions.Rules})
-			if err == nil {
-				cfg.RulesText = string(raw)
+		// Skip Servers/Rules в v6 path — MergePresetsIntoDNS их обработает.
+		if !isV6DNSActive(s) {
+			cfg.Servers = s.DNSOptions.Servers
+			if len(s.DNSOptions.Rules) > 0 {
+				raw, err := json.Marshal(map[string]interface{}{"rules": s.DNSOptions.Rules})
+				if err == nil {
+					cfg.RulesText = string(raw)
+				}
 			}
 		}
 	}
