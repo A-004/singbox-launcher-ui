@@ -1,9 +1,45 @@
-# SPEC 055-F-N — PRESET_OUTBOUNDS
+# SPEC 055-F-S — PRESET_OUTBOUNDS (включая ex-SPEC 056 OUTBOUNDS_PARSER_RESTORE)
 
-**Status:** New (N)
-**Type:** Feature (F)
+**Status:** Shipped (S)
+**Type:** Feature (F) — feature semantics + implementation + post-ship DNS schema cleanup
 **Depends on:** SPEC 053 (preset bundles), SPEC 052 (connections redesign).
 **Bump:** Не требуется (state.json остаётся v6 — `presets_v1` schema без изменений; шаблонная семантика расширяется).
+
+---
+
+## Структура SPEC'а
+
+Этот SPEC объединяет три исторически разделённых документа в одно место:
+
+| Бывшая папка | Что было | Куда переехало |
+|---|---|---|
+| **055** (этот) | Feature spec (что должен делать preset.outbounds) | Раздел «Feature semantics» ниже |
+| **ex-056** OUTBOUNDS_PARSER_RESTORE | Implementation rewrite после провала первой попытки 055 | `IMPLEMENTATION_PLAN.md` + `IMPLEMENTATION_REPORT.md` в этой же папке |
+| **ex-057** STATE_REFS_ONLY (никогда не существовал как папка) | Post-ship DNS schema cleanup того же класса | Раздел «Post-ship: DNS schema cleanup» ниже + соответствующие фазы в plan/report |
+
+Принцип консолидации: **одна фича, один SPEC**. Первая попытка реализации (исходный 055-план — post-merge JSON-patch) провалилась → второй заход (ex-056 — pre-patch parser_config) сработал → выявил родственные DNS-баги → почистили схему. Всё про preset.outbounds — здесь.
+
+---
+
+## Инвариант (объединённый, post-cleanup)
+
+```
+В state.json лежат ТОЛЬКО:
+  • thin refs на template entities (preset_id, server_tag, rule_set_tag)
+    + diff/override (vars, enabled)
+  • полные тела ТОЛЬКО для того, чего нет в template
+    (genuinely user-add: kind=inline/srs route rules; DNS extra_servers/
+    extra_rules для user-added DNS — НЕ template-tag копии)
+
+НИКОГДА не копировать template body в state.
+Копия = дырка во времени: template меняется → копия отстаёт → dangling/конфликт.
+```
+
+Все DNS-server emit-пути проходят через **единую** `stripDNSWizardOnlyFields`
+(single source of truth для cleanup: `description/enabled/title/if/if_or/_*`).
+Все outbound-emit пути проходят через **единый** native generator
+(`GenerateOutboundsFromParserConfig`) — preset.outbounds типизированно
+pre-patch'ат `parserCfg.ParserConfig.Outbounds[]` ДО его запуска.
 
 ---
 
@@ -283,3 +319,45 @@ Globals в template — это «база». Presets ADD сверху. Если 
 2. **`docs/release_notes/upcoming.md`** entry (EN + RU): «preset.outbounds — self-contained outbound groups; ru-inside preset now ships its own RU-selector».
 3. **No state migration needed** (см. State / migration выше).
 4. **Existing user configs** с enabled `ru-inside` — config.json после update будет identical (proxy-out отфильтрован + ru VPN 🇷🇺 присутствует). Без `ru-inside` enabled — proxy-out чище, потеря: lost `ru VPN 🇷🇺` из selector dropdown'ов (если юзер вручную выбрал его на каком-то правиле — `cleanDanglingOutboundRefInRule` его пересадит на route.final).
+
+---
+
+# Implementation history
+
+## Phase 0 — первая попытка (abandoned)
+
+Изначальный план SPEC 055 (см. `PLAN.md` оригинал в git history до коммита `098c5e1`) — **post-merge JSON-патч**: native pipeline эмитит чистый sing-box outbounds[], потом отдельная функция накладывает preset.outbounds сверху (mutate JSON).
+
+Это не сработало: preset.outbounds — это **parser-формат** (зеркало `configtypes.OutboundConfig` с `options/filters/addOutbounds/comment/wizard`), а финал — **sing-box формат** (с flatten'нутыми options, резолвнутыми filters, без launcher-only полей). Post-merge тащил launcher-only поля в финал → sing-box 1.12+ FATAL на каждом Rebuild. Каждый strip-фикс ловил один симптом, следующий запускался при следующем поле. 5 итераций «добавим ещё один strip» → код-хаос, фича так и не заработала.
+
+Revert: `098c5e1 revert(spec-055): surgical revert of preset.outbounds implementation chaos`.
+
+## Phases 1–8 — pre-patch parser_config (ex-SPEC 056)
+
+Архитектурный сдвиг: preset.outbounds **типизированно** конвертится в `configtypes.OutboundConfig` и **pre-patch'ится** в deep-clone `parserCfg.ParserConfig.Outbounds[]` **до** запуска native `GenerateOutboundsFromParserConfig`. Native pipeline (без изменений с v0.9.5) сам делает options-flatten / filters→`filterNodesForSelector` / addOutbounds union / comment-as-prefix. **Ноль strip-функций** для outbound JSON.
+
+Полный план в `IMPLEMENTATION_PLAN.md`. Полный отчёт в `IMPLEMENTATION_REPORT.md`. Кратко:
+
+| Phase | Commit | Что |
+|---|---|---|
+| 1 | `098c5e1` | Surgical revert хаоса первой попытки |
+| 2 | `4756b39` | `PresetOutbound` type + loader validation |
+| 3 | `2b2e77a` | `ApplyPresetOutboundsToParserConfig` + `ExpandPresetOutbounds` |
+| 4 | `8fb10f7` | Wire pre-patch в rebuild / Update / wizard Preview |
+| 5 | `2d16895` | Route dangling outbound cleanup |
+| 6 | `c20b24a` | UI: `collectActivePresetOutboundTags` + refresh-on-toggle |
+| 7 | `ee6e8e4` + `b745f1d` | Template migration (RU presets) + RequiredTemplateRef bump |
+| 8 | `23a7b10` | 27 unit-тестов + release notes |
+
+## Post-ship: DNS schema cleanup (ex-SPEC 057, merged-in)
+
+После Phase 8 manual-QA вскрылись 4 регрессии **того же класса** в DNS pipeline:
+
+1. **`description` течёт в финал** для preset-bundled DNS-серверов (sing-box 1.12+ rejects) — `9daa3cd` ввёл `stripDNSWizardOnlyFields` как **single source of truth** sanitize-функцию для всех DNS server emit-путей (preset bundled, extra_servers, template defaults).
+2. **User inline route rule с `protocol: bittorrent`** крашился — sing-box headless rule_set отвергает connection-level match-поля. `c60fd63` — emit user inline match **напрямую в route.rules[]** без `rule_set` обёртки.
+3. **Template DNS library не материализуется** — `cloudflare_udp` enabled в DNS tab, но в config'е его нет, `default_domain_resolver: cloudflare_udp` → FATAL. `e96c86a` — populate `ctx.Preset.TemplateDNSDefaults` в build pipeline.
+4. **Stale extras от старой template-версии** (`extra_rules` ссылается на `ru-domains` который теперь `russian:ru-domains`) — `9daa3cd` ввёл `cleanDanglingDNSRule` (зеркало route Phase 5 для DNS rules) + `collectRuleSetTagsFromPresets`.
+
+**Инвариант (post-cleanup):** см. начало этого SPEC'а. `extra_servers` / `extra_rules` оставлены в `v6.DNSConfig` для **genuinely user-defined** содержимого (например `my-pihole` 192.168.1.5) — НЕ для копий template-тегов. Loader/migration валидируют: template tag в extras → конвертить в `template_servers` override.
+
+См. `IMPLEMENTATION_REPORT.md::Phase 9` для полного списка commits и диффа.
