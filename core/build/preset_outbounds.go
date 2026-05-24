@@ -1,32 +1,27 @@
-// Package build — see preset_outbounds.go for SPEC 056 pre-patch core.
+// Package build — File preset_outbounds.go.
 //
-// File preset_outbounds.go (SPEC 056) — реализация preset.outbounds через
-// **pre-patch** parserCfg.ParserConfig.Outbounds[] **до** запуска native
-// outbound generator'а.
+// SPEC 057-R-N (current): preset outbound binding живёт в state directly
+// через Ref/Updates fields на OutboundConfig. Pre-patch функция
+// ApplyPresetOutboundsToParserConfig (SPEC 056) удалена; runtime path
+// использует SyncOutboundsWithActivePresets (sync_outbounds.go) +
+// MergeOutboundUpdatesInPlace (resolve_outbounds.go).
 //
-// Архитектурный принцип: preset.outbounds — это parser-format (зеркалит
-// configtypes.OutboundConfig), а не post-merge JSON-патч. ExpandPresetOutbounds
-// конвертит template.PresetOutbound[i] → configtypes.OutboundConfig (с
-// vars-substitution + if/if_or filter), затем ApplyPresetOutboundsToParserConfig
-// применяет add/update к **deep-clone** parserCfg.ParserConfig.Outbounds[] в
-// порядке state.RulesV6.
-//
-// Дальше нативный 3-pass GenerateOutboundsFromParserConfig сам делает всё,
-// что нужно sing-box'у: options-flatten, filters→filterNodesForSelector,
-// addOutbounds union, comment-prefix "// %s\n". Ни одной strip/sanitize/
-// transform функции для outbound JSON — это и есть основной выигрыш по
-// сравнению с предыдущей реализацией SPEC 055 (post-merge → каскад strip'ов).
-//
-// См. SPECS/056-B-N-OUTBOUNDS_PARSER_RESTORE/SPEC.md.
+// Этот файл оставляет вспомогательные helper'ы:
+//   - ExpandPresetOutbounds — конвертит template.PresetOutbound[i] →
+//     []presetOutboundEntry (vars-substitution + if/if_or filter).
+//     Используется sync_outbounds.go для расчёта expected add/update entries.
+//   - applyOutboundUpdate — типизированный field-merge patch'а в target.
+//     Используется resolve_outbounds.go::mergeOutboundUpdates.
+//   - CleanDanglingOutboundsInRouteRules — cleanup route.rules при отсутствии
+//     target outbound (e.g. preset disabled, dropped its add).
+//   - cloneOptions / unionStringList — internal helpers для applyOutboundUpdate.
 package build
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 
 	"singbox-launcher/core/config/configtypes"
-	v6 "singbox-launcher/core/state/v6"
 	"singbox-launcher/core/template"
 )
 
@@ -49,150 +44,38 @@ var outboundSentinelLiterals = map[string]bool{
 // presetOutboundEntry — internal: разделяет режим применения и сам
 // configtypes.OutboundConfig (без control-полей mode/if/if_or).
 //
-// Возвращается ExpandPresetOutbounds и потребляется в
-// ApplyPresetOutboundsToParserConfig. PresetID нужен только для warning'ов.
+// Возвращается ExpandPresetOutbounds и потребляется sync_outbounds.go.
+// PresetID нужен для warning'ов и для разрешения origin'а в Updates[] стеке.
 type presetOutboundEntry struct {
 	Mode     string // "add" | "update"
 	Config   configtypes.OutboundConfig
 	PresetID string
 }
 
-// ApplyPresetOutboundsToParserConfig возвращает копию parserCfg с применёнными
-// preset.outbounds[] от всех enabled preset-ref'ов из rules.
+// SPEC 057-R-N: ApplyPresetOutboundsToParserConfig + PresetOutboundAddTags
+// удалены. Runtime использует SyncOutboundsWithActivePresets (sync_outbounds.go)
+// + MergeOutboundUpdatesInPlace (resolve_outbounds.go). UI читает preset
+// binding напрямую через OutboundConfig.Ref/Updates.
+
+// PresetOutboundAddByTag — exported helper для UI: возвращает preset-defined
+// body для tag (mode=add only) с учётом текущих vars. Используется кнопкой
+// Reset на preset outbound row'ах — replace state body на freshly-expanded
+// preset definition.
 //
-// Mutates: ничего — оригинал parserCfg deep-cloned перед изменениями
-// (acceptance #7 SPEC 056: disable preset → effect полностью исчезает,
-// потому что original parser_config never touched).
-//
-// Алгоритм:
-//
-//  1. Deep-clone parserCfg (JSON round-trip).
-//  2. Собрать map[tag]→index по cloned.ParserConfig.Outbounds[] и "global tags"
-//     (для дифференциации warning'ов на collision: с global vs earlier preset).
-//  3. Walk rules в их порядке (Kind=preset && Enabled), для каждого:
-//     a. lookup preset by Ref;
-//     b. decode body.vars;
-//     c. ExpandPresetOutbounds(preset, vars) → []presetOutboundEntry;
-//     d. для каждой entry:
-//     - mode="add":
-//     • tag в map → identical body → silent skip (warning класса DEBUG),
-//     иначе first wins + warning (с указанием "global" vs "earlier preset")
-//     • новый tag → append + update map
-//     - mode="update":
-//     • tag не в map → warning, no-op (no auto-create)
-//     • tag в map → applyOutboundUpdate(target, entry.Config) → replace
-//  4. Возвращает (cloned, warnings, nil).
-//
-// Errors: возвращает (nil, nil, err) только если parserCfg сам nil.
-// JSON-marshal/unmarshal на clone'е — internal-only path с фиксированной
-// структурой; ошибка тут = bug в Go runtime, не user-facing.
-func ApplyPresetOutboundsToParserConfig(
-	parserCfg *configtypes.ParserConfig,
-	presets []template.Preset,
-	rules []v6.Rule,
-) (*configtypes.ParserConfig, []string, error) {
-	if parserCfg == nil {
-		return nil, nil, fmt.Errorf("ApplyPresetOutboundsToParserConfig: nil parserCfg")
+// Возвращает nil если preset nil, tag не найден, или entry была отфильтрована
+// if/if_or (т.е. preset defines outbound для других var-комбинаций).
+func PresetOutboundAddByTag(preset *template.Preset, vars map[string]string, tag string) *configtypes.OutboundConfig {
+	if preset == nil || tag == "" {
+		return nil
 	}
-
-	cloned, err := cloneParserConfig(parserCfg)
-	if err != nil {
-		return nil, nil, fmt.Errorf("ApplyPresetOutboundsToParserConfig: clone parserCfg: %w", err)
-	}
-
-	// Quick out — no enabled rules → return clone (acceptance: idempotent
-	// rebuild без активных preset'ов даёт parser_config-byte-for-byte equal
-	// исходному; разница только в указателе).
-	if !hasAnyV6Rule(rules) {
-		return cloned, nil, nil
-	}
-
-	presetByID := make(map[string]*template.Preset, len(presets))
-	for i := range presets {
-		presetByID[presets[i].ID] = &presets[i]
-	}
-
-	outbounds := cloned.ParserConfig.Outbounds
-	tagToIndex := make(map[string]int, len(outbounds))
-	for i, o := range outbounds {
-		tagToIndex[o.Tag] = i
-	}
-	// globalTags фиксируется ДО первого apply — используется чтобы в
-	// warning'е на collision сказать "с template global" vs "с earlier
-	// preset". (При втором preset.add того же tag'а tagToIndex уже содержит
-	// preset-added entry от первого preset'а — и это для warning'а другой
-	// семантический класс.)
-	globalTags := make(map[string]bool, len(outbounds))
-	for _, o := range outbounds {
-		globalTags[o.Tag] = true
-	}
-
-	var warnings []string
-
-	for _, rule := range rules {
-		if !rule.Enabled || rule.Kind != v6.RuleKindPreset {
-			continue
-		}
-		preset, ok := presetByID[rule.Ref]
-		if !ok {
-			continue // unknown preset ref — preset_merge уже warning'ит
-		}
-		body, err := rule.DecodeBody()
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf(
-				"preset outbounds: decode body for ref %q: %v", rule.Ref, err))
-			continue
-		}
-		pb, _ := body.(*v6.PresetBody)
-		if pb == nil {
-			continue
-		}
-		entries, expandWarns := ExpandPresetOutbounds(preset, pb.Vars)
-		for _, w := range expandWarns {
-			warnings = append(warnings, "preset outbounds: "+w.String())
-		}
-
-		for _, entry := range entries {
-			tag := entry.Config.Tag
-			switch entry.Mode {
-			case "add":
-				if idx, has := tagToIndex[tag]; has {
-					existing := outbounds[idx]
-					if outboundsIdentical(existing, entry.Config) {
-						// Identical body — silent skip (бессмысленно дублировать;
-						// возникает естественно когда ru-inside+russian оба добавляют
-						// "ru VPN 🇷🇺" с тем же body — copy-paste, не баг).
-						continue
-					}
-					src := "earlier preset"
-					if globalTags[tag] {
-						src = "template global"
-					}
-					warnings = append(warnings, fmt.Sprintf(
-						"preset %q: outbound add tag %q collides with %s "+
-							"(first wins; this entry skipped)",
-						entry.PresetID, tag, src))
-					continue
-				}
-				outbounds = append(outbounds, entry.Config)
-				tagToIndex[tag] = len(outbounds) - 1
-
-			case "update":
-				idx, has := tagToIndex[tag]
-				if !has {
-					warnings = append(warnings, fmt.Sprintf(
-						"preset %q: outbound update target tag %q not found "+
-							"(no auto-create; skipped)",
-						entry.PresetID, tag))
-					continue
-				}
-				outbounds[idx] = applyOutboundUpdate(outbounds[idx], entry.Config)
-			}
+	entries, _ := ExpandPresetOutbounds(preset, vars)
+	for _, e := range entries {
+		if e.Mode == "add" && e.Config.Tag == tag {
+			cfg := e.Config
+			return &cfg
 		}
 	}
-
-	cloned.ParserConfig.Outbounds = outbounds
-	return cloned, warnings, nil
+	return nil
 }
 
 // ExpandPresetOutbounds разворачивает preset.Outbounds[] в []presetOutboundEntry
@@ -361,45 +244,6 @@ func applyOutboundUpdate(target, patch configtypes.OutboundConfig) configtypes.O
 		out.Comment = patch.Comment
 	}
 	return out
-}
-
-// cloneParserConfig — deep-copy *configtypes.ParserConfig через JSON round-trip.
-//
-// Используется для immutable-input гарантии: оригинал parserCfg (из template
-// или state) НЕ должен меняться при apply preset.outbounds. JSON-марш на
-// маленькой структуре (~10-30 outbounds) — микросекунды, не bottleneck.
-func cloneParserConfig(in *configtypes.ParserConfig) (*configtypes.ParserConfig, error) {
-	raw, err := json.Marshal(in)
-	if err != nil {
-		return nil, err
-	}
-	var out configtypes.ParserConfig
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// outboundsIdentical — true если две configtypes.OutboundConfig дают
-// **точно** одинаковый JSON. Используется для silent-skip на collision'е
-// одинаковых mode=add entries (ru-inside и russian оба добавляют "ru VPN 🇷🇺"
-// с identical body — copy-paste, не warning).
-//
-// Метод "byte-equal JSON" работает потому что:
-//   - encoding/json эмитит map[string]interface{} ключи в lexicographic
-//     order (deterministic);
-//   - struct поля идут в declaration order (deterministic);
-//   - omitempty для нулевых значений (deterministic).
-//
-// Edge case: разные nil vs empty slice/map (Filters nil vs Filters{}) — JSON
-// видит их одинаково благодаря omitempty, так что safe.
-func outboundsIdentical(a, b configtypes.OutboundConfig) bool {
-	raw1, err1 := json.Marshal(a)
-	raw2, err2 := json.Marshal(b)
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	return bytes.Equal(raw1, raw2)
 }
 
 // cloneOptions — deep-copy map[string]interface{} через JSON round-trip.

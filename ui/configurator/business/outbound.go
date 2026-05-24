@@ -73,8 +73,15 @@ func GetAvailableOutbounds(model *wizardmodels.WizardModel) []string {
 				tags[extra] = struct{}{}
 			}
 		}
-		// Add local outbounds from all ProxySource
+		// Add local outbounds from all ProxySource.
+		// Skip disabled subscriptions — UI dropdown должен показывать только теги,
+		// которые реально попадут в финальный config.json (build pipeline тоже
+		// пропускает disabled подписки). Иначе юзер может выбрать "BL:select"
+		// от отключённой подписки → dangling outbound в emit.
 		for _, proxySource := range parserCfg.ParserConfig.Proxies {
+			if proxySource.Disabled {
+				continue
+			}
 			for _, outbound := range proxySource.Outbounds {
 				if outbound.IsWizardHidden() {
 					continue

@@ -200,18 +200,15 @@ func buildSinglePresetRefRow(
 				outSel.Disable()
 			}
 		}
-		// Бандлd DNS-серверы и dns_rule preset'а появляются/исчезают вместе с
-		// enable toggle (renderPresetBundledDNSRows пропускает !pr.Enabled).
-		// Без RefreshDNSListAndSelects юзер видит stale entries в DNS tab.
-		presenter.RefreshDNSListAndSelects()
-		// SPEC 056: если preset имеет outbounds[] с mode=add — toggle добавляет/
-		// удаляет available outbound-теги. Custom rule outbound dropdowns +
-		// final outbound select видят это через RefreshOutboundOptions; inline
-		// preset-ref selects других rows подхватятся через rebuild Rules tab.
-		// Anti-loop защита: enableCh создан с nil OnChanged и Checked.Field
-		// напрямую (см. ниже в коде), так что rebuild не триггерит каскадно.
+		// Единая точка для всех аftermath'ов preset toggle:
+		// DNS UI refresh + outbounds eager sync + outbounds UI + available
+		// outbounds для Rules/Final selects (см. RefreshAfterPresetToggle docstring).
+		presenter.RefreshAfterPresetToggle()
+		// Если preset имеет outbounds[] с mode=add — rebuild Rules tab чтобы
+		// inline preset-ref selects других rows видели новые/удалённые tag'и.
+		// (RefreshAfterPresetToggle уже обновил RefreshOutboundOptions, но
+		// rebuild всего таба нужен только когда tag set реально меняется.)
 		if presetHasAddOutbounds(tplPreset) {
-			presenter.RefreshOutboundOptions()
 			refreshRulesTabFromPresenter(presenter, showAddRuleDialog)
 		}
 	}

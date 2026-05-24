@@ -81,25 +81,40 @@ func ParseAndPreview(ctx UIUpdater, configService ConfigService) error {
 	debuglog.DebugLog("parseAndPreview: Parsed ParserConfig (sources: %d, outbounds: %d)",
 		len(parserConfig.ParserConfig.Proxies), len(parserConfig.ParserConfig.Outbounds))
 
-	// SPEC 056: pre-patch parser_config с preset.outbounds[] ДО запуска
-	// generator'а, чтобы preview-cache (model.GeneratedOutbounds) совпадал
-	// с тем, что Save/Rebuild сгенерируют. Без этого Preview tab и финальный
-	// config расходятся: preview без preset.outbounds-эффекта, реальный
-	// config с ним. Reconcile RuleOrder сначала — порядок preset-ref'ов
-	// важен для tag-collision first-wins семантики.
+	// SPEC 057-R-N: shape parser_config для generator'а.
+	//
+	//   1. Sync — мутирует parserConfig.Outbounds (adopt legacy globals, drop
+	//      stale preset entries, материализует Updates[] стеки на target'ах).
+	//      Это safely persistable shape — Updates[] стек сохраняется в state.
+	//   2. Merge — flatten Updates[] стек в финальное body. **Это
+	//      destructive** для state shape (теряется Updates[] стек).
+	//
+	// Generator знает только base body — поэтому Merge нужен для нужно ему.
+	// НО результат Merge **не должен** попасть обратно в model.ParserConfig
+	// (иначе Save запишет merged body без updates[] стека, и при следующем
+	// Sync preset patches применятся вторично — двойной merge).
+	//
+	// Решение: после Sync копируем parserConfig в parserConfigForGen,
+	// Merge только на копии, generator работает с копией, в model.ParserConfig
+	// уходит несмерженная версия с Updates[] стеком intact.
+	parserConfigForGen := parserConfig
 	if model.TemplateData != nil {
 		wizardmodels.ReconcileRuleOrder(model)
 		rulesV6 := wizardmodels.SyncRulesByOrderToStateRulesV6(
 			model.RuleOrder, model.PresetRefs, model.CustomRules,
 		)
-		if patched, warnings, perr := build.ApplyPresetOutboundsToParserConfig(&parserConfig, model.TemplateData.Presets, rulesV6); perr == nil {
-			for _, w := range warnings {
-				debuglog.WarnLog("parseAndPreview: %s", w)
+		build.SyncOutboundsWithActivePresets(rulesV6, &parserConfig.ParserConfig.Outbounds, model.TemplateData.Presets)
+		// Deep-copy outbounds slice для generator-only Merge.
+		// Per-element copy чтобы Updates[] стек не shared.
+		genOutbounds := make([]config.OutboundConfig, len(parserConfig.ParserConfig.Outbounds))
+		for i, ob := range parserConfig.ParserConfig.Outbounds {
+			genOutbounds[i] = ob
+			if len(ob.Updates) > 0 {
+				genOutbounds[i].Updates = append([]config.OutboundUpdate(nil), ob.Updates...)
 			}
-			parserConfig = *patched
-		} else {
-			debuglog.WarnLog("parseAndPreview: preset.outbounds pre-patch failed (using original): %v", perr)
 		}
+		parserConfigForGen.ParserConfig.Outbounds = genOutbounds
+		build.MergeOutboundUpdatesInPlace(&parserConfigForGen)
 	}
 
 	// Generate outbounds from current ParserConfig only. Do not apply SourceURLs here:
@@ -126,7 +141,7 @@ func ParseAndPreview(ctx UIUpdater, configService ConfigService) error {
 	}
 
 	result, err := configService.GenerateOutboundsFromParserConfig(
-		&parserConfig, tagCounts, progressCallback)
+		&parserConfigForGen, tagCounts, progressCallback)
 	if err != nil {
 		timing.LogTiming("generate outbounds", time.Since(generateStartTime))
 		debuglog.DebugLog("parseAndPreview: Failed to generate outbounds: %v", err)

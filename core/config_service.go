@@ -177,22 +177,17 @@ func (svc *ConfigService) UpdateConfigFromSubscriptions() (*config.OutboundGener
 	subst := config.BuildVarSubstituterFromDisk(execDir)
 	config.SubstituteParserConfigPlaceholders(parserConfig, subst)
 
-	// SPEC 056: pre-patch parser_config с preset.outbounds[] от enabled
-	// preset-refs ДО запуска generator'а. На failure (template missing /
-	// preset broken) — warning + fallback на оригинальный parser_config:
-	// Update должен работать даже если preset bundles повреждены, иначе
-	// юзер не сможет обновить подписки.
+	// SPEC 057-R-N: ensure parser_config.outbounds в правильном shape:
+	//   Sync — приводит slice в соответствие с active preset refs
+	//          (template might have changed since last UI save).
+	//   Merge — flatten Updates[] стеки в финальное body для generator'а.
+	// На failure LoadTemplateData (template missing) — warning + skip;
+	// Update должен работать даже без template'а (legacy юзеры).
 	if td, terr := template.LoadTemplateData(execDir); terr == nil {
-		if patched, warnings, perr := build.ApplyPresetOutboundsToParserConfig(parserConfig, td.Presets, stateRef.RulesV6); perr == nil {
-			for _, w := range warnings {
-				debuglog.WarnLog("UpdateConfigFromSubscriptions: %s", w)
-			}
-			*parserConfig = *patched
-		} else {
-			debuglog.WarnLog("UpdateConfigFromSubscriptions: preset.outbounds pre-patch failed (using original): %v", perr)
-		}
+		build.SyncOutboundsWithActivePresets(stateRef.RulesV6, &parserConfig.ParserConfig.Outbounds, td.Presets)
+		build.MergeOutboundUpdatesInPlace(parserConfig)
 	} else {
-		debuglog.WarnLog("UpdateConfigFromSubscriptions: LoadTemplateData failed (skip preset.outbounds pre-patch): %v", terr)
+		debuglog.WarnLog("UpdateConfigFromSubscriptions: LoadTemplateData failed (skip preset.outbounds sync): %v", terr)
 	}
 
 	updateParserProgress(ac, 5, "Parsed ParserConfig block")
@@ -349,7 +344,7 @@ func (ac *AppController) buildContextFromState(s *state.State, cache *build.Pars
 	ctx.Preset = build.PresetMergeContext{
 		Presets:             td.Presets,
 		RulesV6:             s.RulesV6,
-		DNS:                 s.DNSV6,
+		DNS:                 s.DNS,
 		SrsCachedPaths:      build.CollectSrsCachedPaths(s.RulesV6, ac.FileService.ExecDir),
 		TemplateDNSDefaults: parseTemplateDNSDefaultsFromTD(td),
 	}
@@ -375,55 +370,63 @@ func parseTemplateDNSDefaultsFromTD(td *template.TemplateData) []build.TemplateD
 	if err := json.Unmarshal(td.DNSOptionsRaw, &dnsOpt); err != nil {
 		return nil
 	}
-	return build.ParseTemplateDNSDefaults(dnsOpt.Servers)
+	parsed := build.ParseTemplateDNSDefaults(dnsOpt.Servers)
+	// Validation warnings — non-fatal; logged для debug.
+	for _, w := range build.ValidateTemplateDNSServers(parsed) {
+		debuglog.WarnLog("template validation: %s", w)
+	}
+	return parsed
 }
 
 // dnsConfigForUpdate — извлекает DNS-related данные из state в build.DNSConfig.
-// state.DNSOptions содержит servers/rules; final/strategy/independent_cache
-// исторически живут в state.Vars (dns_*) после миграции SPEC 032.
 //
-// Schema distinction (inlined, без named helper):
-//   - v6 state — `DNSOptions` это derived view от `DNSV6` (см. state/load.go::
-//     legacyDNSOptionsFromV6). Build path должен идти через `ctx.Preset.DNS`
-//     (= `state.DNSV6`) в MergePresetsIntoDNS, не через cfg.Servers/RulesText.
-//     Иначе double-emit.
-//   - pure-v5 state — DNSOptions единственный источник данных, нужно читать
+// Schema distinction:
+//   - v6 state — `state.DNS` (v6.DNSOptions) — flat servers[]/rules[] через
+//     kind discriminator. Servers/Rules эмитятся через `ctx.Preset.DNS`
+//     в MergePresetsIntoDNS. Здесь читаем только scalars (Final/Strategy)
+//     — но они в state живут в Vars[].
+//   - pure-v5 state — DNSOptions единственный источник данных, читаем
 //     cfg.Servers/RulesText.
 //
-// Distinguish: v6 schema active iff RulesV6 непуст OR DNSV6.{TemplateServers,
-// ExtraServers,ExtraRules} непусты.
+// v6 active iff len(s.RulesV6) > 0 OR len(s.DNS.Servers/Rules) > 0.
+//
+// dns_* scalars из state.Vars[] всегда побеждают (SPEC 056-R-N: единый
+// KV-store для всех wizard vars, включая dns_*).
+//
+// SPEC: independent_cache УДАЛЕНО — deprecated в sing-box 1.14.0; legacy
+// state.Vars[dns_independent_cache] и DNSOptions.IndependentCache игнорируются.
 func dnsConfigForUpdate(s *state.State) build.DNSConfig {
 	cfg := build.DNSConfig{}
-	if s.DNSOptions != nil {
+
+	v6Active := s != nil &&
+		(len(s.RulesV6) > 0 ||
+			len(s.DNS.Servers) > 0 ||
+			len(s.DNS.Rules) > 0)
+
+	if v6Active {
+		// v6 path: scalars из DNSV6; servers/rules идут через ctx.Preset.DNS.
+		cfg.Final = s.DNS.Final
+		cfg.Strategy = s.DNS.Strategy
+	} else if s.DNSOptions != nil {
+		// pure-v5 path
 		cfg.Final = s.DNSOptions.Final
 		cfg.Strategy = s.DNSOptions.Strategy
-		cfg.IndependentCache = s.DNSOptions.IndependentCache
-
-		// Skip Servers/Rules read в v6 path (см. comment выше).
-		v6Active := s != nil &&
-			(len(s.RulesV6) > 0 ||
-				len(s.DNSV6.TemplateServers) > 0 ||
-				len(s.DNSV6.ExtraServers) > 0 ||
-				len(s.DNSV6.ExtraRules) > 0)
-		if !v6Active {
-			cfg.Servers = s.DNSOptions.Servers
-			if len(s.DNSOptions.Rules) > 0 {
-				raw, err := json.Marshal(map[string]interface{}{"rules": s.DNSOptions.Rules})
-				if err == nil {
-					cfg.RulesText = string(raw)
-				}
+		cfg.Servers = s.DNSOptions.Servers
+		if len(s.DNSOptions.Rules) > 0 {
+			raw, err := json.Marshal(map[string]interface{}{"rules": s.DNSOptions.Rules})
+			if err == nil {
+				cfg.RulesText = string(raw)
 			}
 		}
 	}
+
+	// dns_* scalars из vars[] (источник истины; SPEC 032 + SPEC 056-R-N).
 	for _, v := range s.Vars {
 		switch v.Name {
 		case "dns_final":
 			cfg.Final = v.Value
 		case "dns_strategy":
 			cfg.Strategy = v.Value
-		case "dns_independent_cache":
-			b := v.Value == "true"
-			cfg.IndependentCache = &b
 		}
 	}
 	return cfg

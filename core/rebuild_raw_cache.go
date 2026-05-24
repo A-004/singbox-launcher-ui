@@ -72,21 +72,16 @@ func buildSnapshotFromRawCache(s *state.State, execDir string, subst config.VarS
 		config.SubstituteParserConfigPlaceholders(&parserCfg, def)
 	}
 
-	// SPEC 056: pre-patch parser_config с preset.outbounds[] (mode=add/update)
-	// от enabled preset-refs ДО запуска native GenerateOutboundsFromParserConfig.
-	// Native generator потом сам делает options-flatten, filters/addOutbounds
-	// резолв, comment-prefix — никаких post-merge strip'ов в финале.
+	// SPEC 057-R-N: ensure parserCfg.Outbounds в правильном shape перед emit.
+	//   1. Sync приводит slice к "active preset ref entries + Updates[] стеки"
+	//      (handles stale state: template changed since last UI save, или
+	//      legacy state.json без ref/updates).
+	//   2. MergeOutboundUpdatesInPlace flatten'ит Updates[] стеки в финальное
+	//      body — generator про эти поля не знает, видит уже merged.
 	// td=nil → quiet skip (тесты, legacy fallback path).
 	if td != nil {
-		patched, warnings, err := build.ApplyPresetOutboundsToParserConfig(&parserCfg, td.Presets, s.RulesV6)
-		if err != nil {
-			debuglog.WarnLog("buildSnapshotFromRawCache: preset.outbounds pre-patch failed (using original parser_config): %v", err)
-		} else {
-			for _, w := range warnings {
-				debuglog.WarnLog("buildSnapshotFromRawCache: %s", w)
-			}
-			parserCfg = *patched
-		}
+		build.SyncOutboundsWithActivePresets(s.RulesV6, &parserCfg.ParserConfig.Outbounds, td.Presets)
+		build.MergeOutboundUpdatesInPlace(&parserCfg)
 	}
 
 	tagCounts := make(map[string]int)

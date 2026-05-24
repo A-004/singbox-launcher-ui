@@ -145,14 +145,17 @@ func (s *State) marshalDisk() ([]byte, error) {
 	return json.MarshalIndent(out, "", "  ")
 }
 
-// marshalDiskV6 — сериализация State в v6-форму (SPEC 053).
+// marshalDiskV6 — сериализация State в v6-форму (SPEC 053 + SPEC 056-R-N).
 //
 //	{
 //	  "meta":        { version: 6, schema: "presets_v1", ... },
 //	  "connections": { ... },
 //	  "rules":       [ {kind, ref|id, enabled, body} ],
-//	  "vars":        [ ... ],
-//	  "dns":         { strategy, ..., template_servers, extra_servers, extra_rules }
+//	  "vars":        [ ... ],                                  // dns_* scalars живут здесь
+//	  "dns_options": {                                          // SPEC 056-R-N
+//	    "servers": [ {kind:template|preset|user, tag|ref, enabled, ...body} ],
+//	    "rules":   [ {kind:preset|user, ref|..., enabled, ...body} ]
+//	  }
 //	}
 //
 // legacy CustomRules / DNSOptions в v6 не сериализуются (источник — RulesV6 / DNSV6).
@@ -162,7 +165,7 @@ func (s *State) marshalDiskV6() ([]byte, error) {
 		Connections v5.ConnectionsSection `json:"connections"`
 		Rules       []v6.Rule             `json:"rules"`
 		Vars        []SettingVar          `json:"vars,omitempty"`
-		DNS        v6.DNSConfig          `json:"dns"`
+		DNSOptions  v6.DNSOptions         `json:"dns_options"`
 	}{
 		Meta: v6.MetaSection{
 			Version:   v6.SchemaVersion,
@@ -174,7 +177,7 @@ func (s *State) marshalDiskV6() ([]byte, error) {
 		Connections: s.Connections,
 		Rules:       s.RulesV6,
 		Vars:        s.Vars,
-		DNS:         s.DNSV6,
+		DNSOptions:  s.DNS,
 	}
 	if out.Rules == nil {
 		out.Rules = []v6.Rule{}

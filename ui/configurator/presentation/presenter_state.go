@@ -27,7 +27,10 @@ import (
 	"time"
 
 	"singbox-launcher/core"
+	"singbox-launcher/core/build"
 	"singbox-launcher/core/config/configtypes"
+	corev6 "singbox-launcher/core/state/v6"
+	wizardtemplate "singbox-launcher/core/template"
 	"singbox-launcher/internal/debuglog"
 	wizardbusiness "singbox-launcher/ui/configurator/business"
 	wizardmodels "singbox-launcher/ui/configurator/models"
@@ -111,16 +114,42 @@ func (p *WizardPresenter) CreateStateFromModel(comment, id string) *wizardmodels
 		p.model.RuleOrder, p.model.PresetRefs, p.model.CustomRules,
 	)
 
-	// SPEC 053: full DNS sync — overrides + extra_servers + extra_rules.
+	// SPEC 056-R-N: full DNS sync → flat servers[]/rules[] через kind discriminator.
 	// Template DNS tag-set извлекаем из template.dns_options для split'а
-	// model.DNSServers на template-overrides vs user-added extras.
+	// model.DNSServers на kind=template vs kind=user.
 	templateDNSTags := extractTemplateDNSTags(p.model.TemplateData)
-	state.DNSV6 = wizardmodels.SyncDNSFullToStateV6(
+	state.DNS = wizardmodels.SyncDNSFullToStateV6(
 		p.model.DNSServers,
 		p.model.DNSRulesText,
 		p.model.DNSTemplateOverrides,
 		templateDNSTags,
 	)
+	// Lifecycle sync: ensure preset-entries в state.DNS соответствуют активным
+	// preset-ref'ам в state.RulesV6. Idempotent — добавит missing entries и удалит
+	// orphan'ы. Это **единственная** точка где kind=preset entries создаются/удаляются.
+	if p.model.TemplateData != nil {
+		presetMap := wizardtemplate.PresetLiteMap(p.model.TemplateData.Presets)
+		corev6.SyncDNSOptionsWithActivePresets(state.RulesV6, &state.DNS, presetMap)
+	}
+	// SPEC 056-R-N follow-up: apply UI toggle overrides для kind=preset entries.
+	// Sync создал entries с дефолтом Enabled=true; юзерский toggle живёт в
+	// PresetRefState (DNSServerEnabled/DNSRuleEnabled).
+	applyPresetEnabledOverrides(&state.DNS, p.model.PresetRefs)
+
+	// SPEC 057-R-N: lifecycle sync для outbounds. Preset add entries (с Ref)
+	// и mode=update patches (в Updates стеке) синхронизируются с active
+	// preset-ref'ами. Idempotent.
+	//
+	// **Важно — Sync на BOTH viewах:** state.Save() вызывает
+	// syncConnectionsFromLegacy (core/state/adapter.go), который копирует
+	// state.ParserConfig.Outbounds → state.Connections.Outbounds. Если
+	// Sync'нуть только Connections — адаптер затрёт изменения. Sync'аем оба
+	// view'а (или хотя бы ParserConfig — тогда адаптер скопирует корректную
+	// версию в Connections).
+	if p.model.TemplateData != nil {
+		build.SyncOutboundsWithActivePresets(state.RulesV6, &state.Connections.Outbounds, p.model.TemplateData.Presets)
+		build.SyncOutboundsWithActivePresets(state.RulesV6, &state.ParserConfig.ParserConfig.Outbounds, p.model.TemplateData.Presets)
+	}
 
 	// dns_options в state — только servers и rules; скаляры DNS — в state.vars (dns_*).
 	state.DNSOptions = &wizardmodels.PersistedDNSState{
@@ -253,6 +282,14 @@ func (p *WizardPresenter) LoadState(stateFile *wizardmodels.WizardStateFile) err
 	// SPEC 053: restore preset-ref правила (kind=preset из state.RulesV6).
 	p.restorePresetRefs(stateFile)
 
+	// SPEC 057-R-N: sync preset binding в model.GlobalOutbounds после load.
+	// Если state без ref/updates (legacy) — добавит entries для active preset'ов.
+	// Idempotent: повторный вызов с уже-synced state — noop.
+	if p.model.TemplateData != nil {
+		build.SyncOutboundsWithActivePresets(stateFile.RulesV6, &p.model.GlobalOutbounds, p.model.TemplateData.Presets)
+		p.model.RefreshDerivedParserConfig()
+	}
+
 	// Установка флага для парсинга (шаг 7)
 	p.model.PreviewNeedsParse = true
 
@@ -338,7 +375,9 @@ func (p *WizardPresenter) restoreCustomRules(persistedRules []wizardmodels.Persi
 // в CustomRules через restoreCustomRules + legacy view (см. parseV6).
 func (p *WizardPresenter) restorePresetRefs(state *wizardmodels.WizardStateFile) {
 	p.model.PresetRefs = wizardmodels.SyncStateRulesToPresetRefs(state.RulesV6)
-	p.model.DNSTemplateOverrides = wizardmodels.SyncStateV6ToDNSOverrides(state.DNSV6)
+	p.model.DNSTemplateOverrides = wizardmodels.SyncStateV6ToDNSOverrides(state.DNS)
+	// SPEC 056-R-N follow-up: per-server/rule preset enabled overrides → PresetRefState fields.
+	populatePresetEnabledFromState(p.model.PresetRefs, state.DNS)
 
 	// Restore RuleOrder из state.RulesV6 (preserve порядок between save/load).
 	// Fallback на дефолтную последовательность если state v5 (нет RulesV6).
