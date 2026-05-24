@@ -35,7 +35,31 @@ release-сборке это `~/Library/Application Support/singbox-launcher/bin/
 
   "connections": {
     "sources":   [ ... ],     // per-source subscription / server entries
-    "outbounds": [ ... ],     // global outbound selectors / urltests
+    "outbounds": [
+      // обычный user/template global — без preset binding
+      { "tag": "direct-out", "type": "direct" },
+
+      // template global С update-патчами от 1+ preset'ов
+      // Финальное body на emit = base + apply patches в order.
+      {
+        "tag": "proxy-out",
+        "type": "selector",
+        "options": { ... }, "addOutbounds": [ ... ],
+        "updates": [
+          { "ref": "<preset_id_A>", "patch": { "filters": { ... } } },
+          { "ref": "<preset_id_B>", "patch": { "addOutbounds": [ ... ] } }
+        ]
+      },
+
+      // preset add entry — body от preset'а, ref привязка к нему
+      // На disable preset → entry удаляется автоматически.
+      {
+        "tag": "<preset-defined tag>",
+        "type": "selector",
+        "options": { ... }, "filters": { ... },
+        "ref": "<preset_id>"
+      }
+    ],
     "defaults":  { "reload": "4h", "max_nodes": 3000 }
   },
 
