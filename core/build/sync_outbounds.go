@@ -11,22 +11,22 @@
 //
 // Семантика (SPEC 058-R-N §"Sync semantics"):
 //
-//	1. Walk state.outbounds, для каждого:
-//	   - Drop referenced preset entries (ref=<preset_id>) с disabled/missing preset
-//	   - Drop referenced template entries (ref=#TEMPLATE#) если tag отсутствует в template
-//	   - Direct entries (ref="") не трогаем (от template-evolution независимы)
-//	   - Из updates[] drop preset patches от disabled preset; USER patch оставляем
-//	2. Add missing referenced preset add entries
-//	3. Add missing referenced template entries (seeding из template)
-//	4. Add expected preset update patches (mode=update entries)
-//	5. Re-order updates[]: preset patches в rule order, USER в конце
-//	6. Adopt legacy: existing direct entry + tag совпадает с template/preset →
-//	   конвертируем в referenced (set ref, strip body)
+//  1. Walk state.outbounds, для каждого:
+//     - Drop referenced preset entries (ref=<preset_id>) с disabled/missing preset
+//     - Drop referenced template entries (ref=#TEMPLATE#) если tag отсутствует в template
+//     - Direct entries (ref="") не трогаем (от template-evolution независимы)
+//     - Из updates[] drop preset patches от disabled preset; USER patch оставляем
+//  2. Add missing referenced preset add entries
+//  3. Add missing referenced template entries (seeding из template)
+//  4. Add expected preset update patches (mode=update entries)
+//  5. Re-order updates[]: preset patches в rule order, USER в конце
+//  6. Adopt legacy: existing direct entry + tag совпадает с template/preset →
+//     конвертируем в referenced (set ref, strip body)
 package build
 
 import (
 	"singbox-launcher/core/config/configtypes"
-	v6 "singbox-launcher/core/state/v6"
+	"singbox-launcher/core/state"
 	"singbox-launcher/core/template"
 )
 
@@ -45,7 +45,7 @@ import (
 // «Restore missing» UI button, а не автоматически в sync, чтобы юзер сам
 // контролировал какие template entries у него в state).
 func SyncOutboundsWithActivePresets(
-	rules []v6.Rule,
+	rules []state.Rule,
 	outbounds *[]configtypes.OutboundConfig,
 	presets []template.Preset,
 ) {
@@ -68,7 +68,7 @@ func SyncOutboundsWithActivePresets(
 	// expectedUpdates[targetTag][presetID] = OutboundUpdate
 
 	for _, rule := range rules {
-		if rule.Kind != v6.RuleKindPreset || !rule.Enabled || rule.Ref == "" {
+		if rule.Kind != state.RuleKindPreset || !rule.Enabled || rule.Ref == "" {
 			continue
 		}
 		preset, ok := presetByID[rule.Ref]
@@ -79,7 +79,7 @@ func SyncOutboundsWithActivePresets(
 		if err != nil {
 			continue
 		}
-		pb, _ := body.(*v6.PresetBody)
+		pb, _ := body.(*state.PresetBody)
 		if pb == nil {
 			continue
 		}
@@ -184,7 +184,7 @@ func SyncOutboundsWithActivePresets(
 
 	// 3. Append missing preset add entries (after existing ones in stable order).
 	for _, rule := range rules {
-		if rule.Kind != v6.RuleKindPreset || !rule.Enabled {
+		if rule.Kind != state.RuleKindPreset || !rule.Enabled {
 			continue
 		}
 		preset, ok := presetByID[rule.Ref]
@@ -195,7 +195,7 @@ func SyncOutboundsWithActivePresets(
 		if err != nil {
 			continue
 		}
-		pb, _ := body.(*v6.PresetBody)
+		pb, _ := body.(*state.PresetBody)
 		if pb == nil {
 			continue
 		}

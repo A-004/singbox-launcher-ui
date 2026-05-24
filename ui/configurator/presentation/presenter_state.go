@@ -29,7 +29,7 @@ import (
 	"singbox-launcher/core"
 	"singbox-launcher/core/build"
 	"singbox-launcher/core/config/configtypes"
-	corev6 "singbox-launcher/core/state/v6"
+	corestate "singbox-launcher/core/state"
 	wizardtemplate "singbox-launcher/core/template"
 	"singbox-launcher/internal/debuglog"
 	wizardbusiness "singbox-launcher/ui/configurator/business"
@@ -129,7 +129,7 @@ func (p *WizardPresenter) CreateStateFromModel(comment, id string) *wizardmodels
 	// orphan'ы. Это **единственная** точка где kind=preset entries создаются/удаляются.
 	if p.model.TemplateData != nil {
 		presetMap := wizardtemplate.PresetLiteMap(p.model.TemplateData.Presets)
-		corev6.SyncDNSOptionsWithActivePresets(state.Rules, &state.DNS, presetMap)
+		corestate.SyncDNSOptionsWithActivePresets(state.Rules, &state.DNS, presetMap)
 	}
 	// SPEC 056-R-N follow-up: apply UI toggle overrides для kind=preset entries.
 	// Sync создал entries с дефолтом Enabled=true; юзерский toggle живёт в

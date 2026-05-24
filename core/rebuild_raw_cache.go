@@ -10,7 +10,6 @@ import (
 	"singbox-launcher/core/config/configtypes"
 	"singbox-launcher/core/config/subscription"
 	"singbox-launcher/core/state"
-	v5 "singbox-launcher/core/state/v5"
 	"singbox-launcher/core/template"
 	"singbox-launcher/internal/debuglog"
 	"singbox-launcher/internal/platform"
@@ -118,7 +117,7 @@ func buildBodyLookup(s *state.State, subsDir string) map[string][]byte {
 		if src.Type != state.SourceTypeSubscription || !src.Enabled || src.URL == "" {
 			continue
 		}
-		raw, err := v5.ReadRawBody(subsDir, src.ID)
+		raw, err := state.ReadRawBody(subsDir, src.ID)
 		if err != nil {
 			debuglog.WarnLog("buildBodyLookup: read raw for %s: %v", src.ID, err)
 			continue

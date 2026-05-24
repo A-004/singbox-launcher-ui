@@ -17,7 +17,6 @@ import (
 	"singbox-launcher/core/config/subscription"
 	"singbox-launcher/core/services"
 	"singbox-launcher/core/state"
-	v5 "singbox-launcher/core/state/v5"
 	"singbox-launcher/core/template"
 	"singbox-launcher/internal/debuglog"
 	"singbox-launcher/internal/dialogs"
@@ -345,7 +344,7 @@ func (ac *AppController) buildContextFromState(s *state.State, cache *build.Pars
 	// (preset/inline/srs). Noop когда RulesV6 пуст (legacy v5-only flow).
 	ctx.Preset = build.PresetMergeContext{
 		Presets:             td.Presets,
-		Rules:             s.Rules,
+		Rules:               s.Rules,
 		DNS:                 s.DNS,
 		SrsCachedPaths:      build.CollectSrsCachedPaths(s.Rules, ac.FileService.ExecDir),
 		TemplateDNSDefaults: parseTemplateDNSDefaultsFromTD(td),
@@ -383,7 +382,7 @@ func parseTemplateDNSDefaultsFromTD(td *template.TemplateData) []build.TemplateD
 // dnsConfigForUpdate — извлекает DNS-related данные из state в build.DNSConfig.
 //
 // Schema distinction:
-//   - v6 state — `state.DNS` (v6.DNSOptions) — flat servers[]/rules[] через
+//   - v6 state — `state.DNS` (state.DNSOptions) — flat servers[]/rules[] через
 //     kind discriminator. Servers/Rules эмитятся через `ctx.Preset.DNS`
 //     в MergePresetsIntoDNS. Здесь читаем только scalars (Final/Strategy)
 //     — но они в state живут в Vars[].
@@ -483,8 +482,6 @@ func atomicWriteConfig(path string, data []byte) error {
 	return nil
 }
 
-
-
 // refreshSubscriptionsMetaAndCache — SPEC 052 phase 5: per-source HTTP fetch
 // → парсинг metadata (headers + inline #-comments) → запись raw body в
 // `bin/subscriptions/<id>.raw`, заполнение `Source.Meta`.
@@ -553,7 +550,7 @@ func refreshSubscriptionsMetaAndCache(s *state.State, execDir string) {
 	// только когда ID не упомянут НИГДЕ. Это защищает от случая «Update
 	// активного state'а сносит данные неактивного stage'а».
 	knownIDs := collectAllStageSourceIDs(execDir)
-	if _, gcErr := v5.DeleteOrphans(subsDir, knownIDs); gcErr != nil {
+	if _, gcErr := state.DeleteOrphans(subsDir, knownIDs); gcErr != nil {
 		debuglog.WarnLog("refreshSubscriptionsMetaAndCache: DeleteOrphans: %v", gcErr)
 	}
 
@@ -745,7 +742,7 @@ func refreshOneSubscriptionSource(src *state.Source, defaults state.Defaults, su
 		return true
 	}
 
-	if writeErr := v5.WriteRawBody(subsDir, src.ID, res.RawBody); writeErr != nil {
+	if writeErr := state.WriteRawBody(subsDir, src.ID, res.RawBody); writeErr != nil {
 		debuglog.WarnLog("refreshOneSubscriptionSource: WriteRawBody for %s: %v", src.ID, writeErr)
 	}
 
@@ -773,7 +770,7 @@ func refreshOneSubscriptionSource(src *state.Source, defaults state.Defaults, su
 		effectiveMax = defaults.MaxNodes
 	}
 	if effectiveMax == 0 {
-		effectiveMax = v5.DefaultMaxNodes
+		effectiveMax = state.DefaultMaxNodes
 	}
 	merged.Truncated = merged.NodesCountFetched > effectiveMax
 
@@ -818,7 +815,7 @@ func (svc *ConfigService) RefreshSourceInPlace(src *state.Source) (bool, error) 
 
 	// Defaults для MaxNodes truncation: пытаемся прочитать из state.json,
 	// если он есть. Иначе refreshOneSubscriptionSource fallback'нется на
-	// v5.DefaultMaxNodes — нормально для cold-start.
+	// state.DefaultMaxNodes — нормально для cold-start.
 	var defaults state.Defaults
 	if s, err := state.Load(platform.GetWizardStatePath(execDir)); err == nil {
 		defaults = s.Connections.Defaults

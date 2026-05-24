@@ -38,7 +38,7 @@ package build
 
 import (
 	"singbox-launcher/core/config/configtypes"
-	v6 "singbox-launcher/core/state/v6"
+	"singbox-launcher/core/state"
 	"singbox-launcher/core/template"
 )
 
@@ -53,7 +53,7 @@ import (
 // template_body чтобы корректно diff'нуть юзерский USER patch.
 func MigrateOutboundsToReferencedShape(
 	outbounds *[]configtypes.OutboundConfig,
-	rules []v6.Rule,
+	rules []state.Rule,
 	td *template.TemplateData,
 ) bool {
 	if outbounds == nil || td == nil {
@@ -82,7 +82,7 @@ func MigrateOutboundsToReferencedShape(
 	presetAddByTag := make(map[string]presetAdd)
 
 	for _, rule := range rules {
-		if rule.Kind != v6.RuleKindPreset || !rule.Enabled || rule.Ref == "" {
+		if rule.Kind != state.RuleKindPreset || !rule.Enabled || rule.Ref == "" {
 			continue
 		}
 		p, ok := presetByID[rule.Ref]
@@ -93,7 +93,7 @@ func MigrateOutboundsToReferencedShape(
 		if err != nil {
 			continue
 		}
-		pb, _ := body.(*v6.PresetBody)
+		pb, _ := body.(*state.PresetBody)
 		if pb == nil {
 			continue
 		}

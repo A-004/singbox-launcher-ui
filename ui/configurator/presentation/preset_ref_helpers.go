@@ -8,7 +8,7 @@ package presentation
 import (
 	"encoding/json"
 
-	corev6 "singbox-launcher/core/state/v6"
+	"singbox-launcher/core/state"
 	wizardtemplate "singbox-launcher/core/template"
 	wizardmodels "singbox-launcher/ui/configurator/models"
 )
@@ -38,7 +38,7 @@ func extractTemplateDNSTags(td *wizardtemplate.TemplateData) map[string]bool {
 // проходит по kind=preset entries в state.DNS и применяет toggle overrides
 // из PresetRefState.DNSServerEnabled / DNSRuleEnabled.
 // (SPEC 056-R-N follow-up: per-server toggle живёт в PresetRefState.)
-func applyPresetEnabledOverrides(dns *corev6.DNSOptions, presetRefs []*wizardmodels.PresetRefState) {
+func applyPresetEnabledOverrides(dns *state.DNSOptions, presetRefs []*wizardmodels.PresetRefState) {
 	if dns == nil {
 		return
 	}
@@ -50,11 +50,11 @@ func applyPresetEnabledOverrides(dns *corev6.DNSOptions, presetRefs []*wizardmod
 	}
 	for i := range dns.Servers {
 		s := &dns.Servers[i]
-		if s.Kind != corev6.DNSServerKindPreset {
+		if s.Kind != state.DNSServerKindPreset {
 			continue
 		}
-		presetID := corev6.PresetIDFromServerRef(s.Ref)
-		localTag := corev6.LocalTagFromServerRef(s.Ref)
+		presetID := state.PresetIDFromServerRef(s.Ref)
+		localTag := state.LocalTagFromServerRef(s.Ref)
 		pr, ok := refByPresetID[presetID]
 		if !ok || localTag == "" {
 			continue
@@ -63,7 +63,7 @@ func applyPresetEnabledOverrides(dns *corev6.DNSOptions, presetRefs []*wizardmod
 	}
 	for i := range dns.Rules {
 		r := &dns.Rules[i]
-		if r.Kind != corev6.DNSRuleKindPreset {
+		if r.Kind != state.DNSRuleKindPreset {
 			continue
 		}
 		pr, ok := refByPresetID[r.Ref]
@@ -78,7 +78,7 @@ func applyPresetEnabledOverrides(dns *corev6.DNSOptions, presetRefs []*wizardmod
 // из state.DNS.{Servers,Rules}[kind=preset] заполняет PresetRefState.
 // Default true (отсутствие в map) — но если в state Enabled=false,
 // явно записываем false чтобы UI чекбокс показал правильное состояние.
-func populatePresetEnabledFromState(presetRefs []*wizardmodels.PresetRefState, dns corev6.DNSOptions) {
+func populatePresetEnabledFromState(presetRefs []*wizardmodels.PresetRefState, dns state.DNSOptions) {
 	refByPresetID := make(map[string]*wizardmodels.PresetRefState, len(presetRefs))
 	for _, pr := range presetRefs {
 		if pr != nil && pr.Ref != "" {
@@ -86,11 +86,11 @@ func populatePresetEnabledFromState(presetRefs []*wizardmodels.PresetRefState, d
 		}
 	}
 	for _, s := range dns.Servers {
-		if s.Kind != corev6.DNSServerKindPreset || s.Ref == "" {
+		if s.Kind != state.DNSServerKindPreset || s.Ref == "" {
 			continue
 		}
-		presetID := corev6.PresetIDFromServerRef(s.Ref)
-		localTag := corev6.LocalTagFromServerRef(s.Ref)
+		presetID := state.PresetIDFromServerRef(s.Ref)
+		localTag := state.LocalTagFromServerRef(s.Ref)
 		pr, ok := refByPresetID[presetID]
 		if !ok || localTag == "" {
 			continue
@@ -98,7 +98,7 @@ func populatePresetEnabledFromState(presetRefs []*wizardmodels.PresetRefState, d
 		pr.SetDNSServerEnabled(localTag, s.Enabled)
 	}
 	for _, r := range dns.Rules {
-		if r.Kind != corev6.DNSRuleKindPreset || r.Ref == "" {
+		if r.Kind != state.DNSRuleKindPreset || r.Ref == "" {
 			continue
 		}
 		pr, ok := refByPresetID[r.Ref]
