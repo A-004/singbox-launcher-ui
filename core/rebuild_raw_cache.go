@@ -30,7 +30,7 @@ import (
 // parser_config с preset.outbounds[] перед запуском native outbound
 // generator'а. td=nil → no preset processing (тесты, legacy fallback);
 // non-nil → ApplyPresetOutboundsToParserConfig применяет mode=add/update
-// от enabled preset-refs в s.RulesV6.
+// от enabled preset-refs в s.Rules.
 func buildSnapshotFromRawCache(s *state.State, execDir string, subst config.VarSubstituter, td *template.TemplateData) (*build.ParsedCache, error) {
 	if s == nil {
 		return nil, fmt.Errorf("buildSnapshotFromRawCache: nil state")
@@ -81,8 +81,8 @@ func buildSnapshotFromRawCache(s *state.State, execDir string, subst config.VarS
 	// td=nil → quiet skip (тесты, legacy fallback path).
 	if td != nil {
 		// SPEC 058-R-N: migration legacy direct→referenced. Idempotent.
-		_ = build.MigrateOutboundsToReferencedShape(&parserCfg.ParserConfig.Outbounds, s.RulesV6, td)
-		build.SyncOutboundsWithActivePresets(s.RulesV6, &parserCfg.ParserConfig.Outbounds, td.Presets)
+		_ = build.MigrateOutboundsToReferencedShape(&parserCfg.ParserConfig.Outbounds, s.Rules, td)
+		build.SyncOutboundsWithActivePresets(s.Rules, &parserCfg.ParserConfig.Outbounds, td.Presets)
 		build.MergeOutboundUpdatesInPlace(&parserCfg, td)
 	}
 

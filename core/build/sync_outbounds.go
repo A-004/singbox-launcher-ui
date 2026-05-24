@@ -6,7 +6,7 @@
 // Вызывается:
 //   - На load после parseV6 (idempotent — повторный вызов с тем же state не
 //     меняет ничего)
-//   - На каждый preset toggle в Rules tab (после mutation state.RulesV6)
+//   - На каждый preset toggle в Rules tab (после mutation state.Rules)
 //   - Перед marshalDiskV6 (defensive — гарантия что state в правильном shape)
 //
 // Семантика (SPEC 058-R-N §"Sync semantics"):
@@ -33,7 +33,7 @@ import (
 // SyncOutboundsWithActivePresets — синхронизирует preset binding в outbounds.
 //
 // Параметры:
-//   - rules     — state.RulesV6 (для discovery active preset-ref'ов)
+//   - rules     — state.Rules (для discovery active preset-ref'ов)
 //   - outbounds — pointer на state.Connections.Outbounds (мутируется in-place)
 //   - presets   — template.Presets для resolve preset.Outbounds + Vars
 //
@@ -59,7 +59,7 @@ func SyncOutboundsWithActivePresets(
 	}
 
 	// 1. Compute active preset IDs + expected entries.
-	//    activeRulesOrder — slice presetIDs в порядке state.RulesV6 (для deterministic
+	//    activeRulesOrder — slice presetIDs в порядке state.Rules (для deterministic
 	//    re-order updates[] patches).
 	activePresetIDs := make(map[string]bool)
 	activeRulesOrder := make([]string, 0)

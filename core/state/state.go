@@ -24,8 +24,7 @@ import (
 	"singbox-launcher/core/config/configtypes"
 )
 
-// SchemaVersion — версия on-disk-формата state.json, которую пишет Save
-// (для v5 write path). v6 path пишет SchemaVersionV6 (см. disk_v6.go).
+// SchemaVersion — версия on-disk-формата state.json, которую пишет Save.
 //
 // История:
 //   - v2 — самый ранний формат;
@@ -34,9 +33,9 @@ import (
 //   - v5 — SPEC 052: top-level meta + connections, per-source meta/raw cache.
 //   - v6 — SPEC 053/056: rules[] kind discriminator, dns_options flat shape.
 //
-// Load принимает v2/v3/v4 (с авто-миграцией в v5); Save всегда пишет в текущей
-// шкале (v5 если только pure inline/srs; v6 если есть preset-ref).
-const SchemaVersion = legacySchemaVersionV5
+// SPEC 060 Phase 5: SchemaVersion теперь всегда v6 — dual write path удалён.
+// Load принимает v2/v3/v4/v5 (с авто-миграцией); Save всегда пишет v6.
+const SchemaVersion = SchemaVersionV6
 
 // ── State ────────────────────────────────────────────────────────
 
@@ -110,23 +109,19 @@ type State struct {
 	// кодом который ещё работает через legacy view. В v6 path обычно nil.
 	DNSOptions *LegacyDNSOptionsV5
 
-	// === SPEC 053: v6 preset bundles (opt-in) ===
+	// === SPEC 053: v6 preset bundles ===
 
-	// RulesV6 — новая модель правил (kind discriminator: preset/inline/srs).
+	// Rules — новая модель правил (kind discriminator: preset/inline/srs).
 	// SPEC 053: thin-ref preset bundles. Заполняется при load v6 файлов;
 	// при load v5 — derived из CustomRules через migrateV5ToV6.
 	//
-	// Если ни одно правило не имеет kind=preset, Save выбирает v5-формат
-	// для backward-compat. При появлении хотя бы одного preset-ref Save
-	// автоматически переключается на v6-формат + создаёт state.json.v5.bak.
-	//
-	// SPEC 060 Phase 5: переименовано в Rules.
-	RulesV6 []Rule
+	// SPEC 060 Phase 5: rename RulesV6 → Rules. JSON tag всё ещё "rules".
+	Rules []Rule
 
 	// DNS — новая DNS-секция (SPEC 056-R-N: flat kind discriminator
 	// template/preset/user для servers и preset/user для rules).
 	// Параллельно DNSOptions (legacy v5) для одностороннего sync на Save.
-	// JSON-ключ на диске: "dns_options" (см. state.marshalDiskV6).
+	// JSON-ключ на диске: "dns_options" (см. state.marshalDisk).
 	// Историческое имя поля было DNSV6 (когда v5/v6 co-existed); после
 	// SPEC 056-R-N оба формата это v6 internally, суффикс выкинут.
 	DNS DNSOptions

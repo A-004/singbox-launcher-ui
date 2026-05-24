@@ -26,7 +26,7 @@ var ErrNotFound = errors.New("state: file not found")
 //   - битый JSON → ошибка с понятным контекстом.
 //
 // SPEC 056-R-N: при загрузке v6 файла со старым дев-shape (`dns.template_servers`/
-// `extra_servers`/`extra_rules`) `parseV6` читает его через legacyDevDNSToOptions
+// `extra_servers`/`extra_rules`) `parseCurrent` читает его через legacyDevDNSToOptions
 // fallback и конвертит in-memory в новый flat shape. На ближайшем Save файл
 // перезаписывается в новом layout'е. Никакого backup'а не делаем — конверсия
 // lossless (TestRoundTrip покрывает), v6 не релизился (только dev-state).
@@ -62,9 +62,9 @@ func Parse(data []byte) (*State, error) {
 
 	switch {
 	case probe.Meta.Version >= 6:
-		return parseV6(data)
+		return parseCurrent(data)
 	case probe.Meta.Version == 5:
-		return parseV5(data)
+		return parseV5Legacy(data)
 	case probe.TopLevelVersion >= 2 && probe.TopLevelVersion <= 4:
 		return parseLegacyAndMigrate(data)
 	case probe.TopLevelVersion == 0 && probe.Meta.Version == 0:
@@ -75,7 +75,7 @@ func Parse(data []byte) (*State, error) {
 	}
 }
 
-// parseV6 — прямой read v6-формата (SPEC 053 + SPEC 056-R-N).
+// parseCurrent — прямой read canonical (v6) формата (SPEC 053 + SPEC 056-R-N).
 //
 // v6.State содержит:
 //   - meta {version: 6, schema: "presets_v1", ...}
@@ -96,7 +96,7 @@ func Parse(data []byte) (*State, error) {
 // Для backward-compat UI callsite'ов (DNS tab пока на v5-моделях) генерируется
 // legacy CustomRules view (preset-ref пропускается — UI Phase 6 покажет
 // через новый dialog).
-func parseV6(data []byte) (*State, error) {
+func parseCurrent(data []byte) (*State, error) {
 	var raw struct {
 		Meta        MetaSection        `json:"meta"`
 		Connections ConnectionsSection `json:"connections"`
@@ -121,7 +121,7 @@ func parseV6(data []byte) (*State, error) {
 		Comment:            raw.Meta.Comment,
 		Connections:        raw.Connections,
 		Vars:               raw.Vars,
-		RulesV6:            raw.Rules,
+		Rules:              raw.Rules,
 		DNS:                dnsOpts,
 		RulesLibraryMerged: true,
 	}
@@ -297,8 +297,10 @@ func cloneMap(in map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-// parseV5 — прямой read v5-формата.
-func parseV5(data []byte) (*State, error) {
+// parseV5Legacy — прямой read v5-формата (legacy). После SPEC 060 Phase 5
+// canonical write всегда v6, но v5-файлы юзеров читаются здесь и нормализуются
+// в State. На следующем Save перезаписываются в v6 shape.
+func parseV5Legacy(data []byte) (*State, error) {
 	var raw struct {
 		Meta         metaSectionV5       `json:"meta"`
 		Connections  ConnectionsSection  `json:"connections"`

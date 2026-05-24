@@ -34,7 +34,7 @@ func TestMergePresets_AppendsActivePresetRule(t *testing.T) {
 	raw := json.RawMessage(`{"rules":[{"protocol":"dns","action":"hijack-dns"}],"rule_set":[]}`)
 	ctx := PresetMergeContext{
 		Presets: []template.Preset{p},
-		RulesV6: []v6.Rule{
+		Rules: []v6.Rule{
 			{Kind: v6.RuleKindPreset, Ref: "private-ips", Enabled: true, Body: json.RawMessage(`{"vars":{}}`)},
 		},
 	}
@@ -68,7 +68,7 @@ func TestMergePresets_DisabledPresetRefSkipped(t *testing.T) {
 	raw := json.RawMessage(`{"rules":[],"rule_set":[]}`)
 	ctx := PresetMergeContext{
 		Presets: []template.Preset{{ID: "x", Label: "X", Rule: map[string]interface{}{"ip_is_private": true, "outbound": "direct-out"}}},
-		RulesV6: []v6.Rule{
+		Rules: []v6.Rule{
 			{Kind: v6.RuleKindPreset, Ref: "x", Enabled: false, Body: json.RawMessage(`{"vars":{}}`)},
 		},
 	}
@@ -84,7 +84,7 @@ func TestMergePresets_BrokenRefWarningSkip(t *testing.T) {
 	raw := json.RawMessage(`{"rules":[],"rule_set":[]}`)
 	ctx := PresetMergeContext{
 		Presets: nil, // нет presets — все refs broken
-		RulesV6: []v6.Rule{
+		Rules: []v6.Rule{
 			{Kind: v6.RuleKindPreset, Ref: "nonexistent", Enabled: true, Body: json.RawMessage(`{"vars":{}}`)},
 		},
 	}
@@ -121,7 +121,7 @@ func TestMergePresets_DNSBundledServer(t *testing.T) {
 	dnsRaw := json.RawMessage(`{"servers":[{"tag":"google_doh","type":"https"}],"rules":[]}`)
 	ctx := PresetMergeContext{
 		Presets: []template.Preset{p},
-		RulesV6: []v6.Rule{
+		Rules: []v6.Rule{
 			{Kind: v6.RuleKindPreset, Ref: "ru-direct", Enabled: true, Body: json.RawMessage(`{"vars":{}}`)},
 		},
 		// SPEC 056-R-N: kind=preset entry в DNSOptions.Servers (sync должен был создать).

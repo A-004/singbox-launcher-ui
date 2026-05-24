@@ -185,8 +185,8 @@ func (svc *ConfigService) UpdateConfigFromSubscriptions() (*config.OutboundGener
 	// Update должен работать даже без template'а (legacy юзеры).
 	if td, terr := template.LoadTemplateData(execDir); terr == nil {
 		// SPEC 058-R-N: migration legacy direct→referenced. Idempotent.
-		_ = build.MigrateOutboundsToReferencedShape(&parserConfig.ParserConfig.Outbounds, stateRef.RulesV6, td)
-		build.SyncOutboundsWithActivePresets(stateRef.RulesV6, &parserConfig.ParserConfig.Outbounds, td.Presets)
+		_ = build.MigrateOutboundsToReferencedShape(&parserConfig.ParserConfig.Outbounds, stateRef.Rules, td)
+		build.SyncOutboundsWithActivePresets(stateRef.Rules, &parserConfig.ParserConfig.Outbounds, td.Presets)
 		build.MergeOutboundUpdatesInPlace(parserConfig, td)
 	} else {
 		debuglog.WarnLog("UpdateConfigFromSubscriptions: LoadTemplateData failed (skip preset.outbounds sync): %v", terr)
@@ -340,14 +340,14 @@ func (ac *AppController) buildContextFromState(s *state.State, cache *build.Pars
 	if ac != nil && ac.FileService != nil {
 		ctx.Route.ExecDir = ac.FileService.ExecDir
 	}
-	// SPEC 053: preset bundle merge — все правила из state.RulesV6 в порядке.
-	// Если state.RulesV6 не пуст, MergePresetsIntoRoute берёт на себя весь emit
+	// SPEC 053: preset bundle merge — все правила из state.Rules в порядке.
+	// Если state.Rules не пуст, MergePresetsIntoRoute берёт на себя весь emit
 	// (preset/inline/srs). Noop когда RulesV6 пуст (legacy v5-only flow).
 	ctx.Preset = build.PresetMergeContext{
 		Presets:             td.Presets,
-		RulesV6:             s.RulesV6,
+		Rules:             s.Rules,
 		DNS:                 s.DNS,
-		SrsCachedPaths:      build.CollectSrsCachedPaths(s.RulesV6, ac.FileService.ExecDir),
+		SrsCachedPaths:      build.CollectSrsCachedPaths(s.Rules, ac.FileService.ExecDir),
 		TemplateDNSDefaults: parseTemplateDNSDefaultsFromTD(td),
 	}
 	if ac != nil && ac.FileService != nil {
@@ -390,7 +390,7 @@ func parseTemplateDNSDefaultsFromTD(td *template.TemplateData) []build.TemplateD
 //   - pure-v5 state — DNSOptions единственный источник данных, читаем
 //     cfg.Servers/RulesText.
 //
-// v6 active iff len(s.RulesV6) > 0 OR len(s.DNS.Servers/Rules) > 0.
+// v6 active iff len(s.Rules) > 0 OR len(s.DNS.Servers/Rules) > 0.
 //
 // dns_* scalars из state.Vars[] всегда побеждают (SPEC 056-R-N: единый
 // KV-store для всех wizard vars, включая dns_*).
@@ -401,7 +401,7 @@ func dnsConfigForUpdate(s *state.State) build.DNSConfig {
 	cfg := build.DNSConfig{}
 
 	v6Active := s != nil &&
-		(len(s.RulesV6) > 0 ||
+		(len(s.Rules) > 0 ||
 			len(s.DNS.Servers) > 0 ||
 			len(s.DNS.Rules) > 0)
 
@@ -436,9 +436,9 @@ func dnsConfigForUpdate(s *state.State) build.DNSConfig {
 
 // routeConfigForUpdate — конвертит state.CustomRules в build.RouteConfig.
 //
-// SPEC 053: если state.RulesV6 содержит правила — legacy CustomRules emit
+// SPEC 053: если state.Rules содержит правила — legacy CustomRules emit
 // **скипается** (RouteConfig.Rules = nil). Все правила (preset/inline/srs)
-// эмитятся через MergePresetsIntoRoute в правильном порядке из state.RulesV6.
+// эмитятся через MergePresetsIntoRoute в правильном порядке из state.Rules.
 // Это избегает double-emit (правило не появится дважды в route.rules[]).
 //
 // `route.final` НЕ читается здесь: он подставляется на этапе
@@ -446,7 +446,7 @@ func dnsConfigForUpdate(s *state.State) build.DNSConfig {
 // template substituter → финальный config.json). MergeRouteSection видит
 // пустой FinalOutbound и оставляет уже-substituted шаблонное значение.
 func routeConfigForUpdate(s *state.State) build.RouteConfig {
-	if len(s.RulesV6) > 0 {
+	if len(s.Rules) > 0 {
 		// v6 path: rules эмитятся через MergePresetsIntoRoute в правильном порядке.
 		return build.RouteConfig{}
 	}
@@ -688,7 +688,7 @@ func collectAllStageRuleSetTags(execDir string, td *template.TemplateData) []str
 		}
 		// SPEC 053: preset-ref bundled remote rule_set'ы. content-addressed tag'и.
 		if presetByID != nil {
-			for _, r := range s.RulesV6 {
+			for _, r := range s.Rules {
 				if r.Kind != "preset" || r.Ref == "" {
 					continue
 				}

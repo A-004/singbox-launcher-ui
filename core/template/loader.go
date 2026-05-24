@@ -70,7 +70,7 @@ type TemplateData struct {
 
 	// Presets — параметризованные preset bundles (SPEC 053). Параллельно SelectableRules.
 	// Каждый Preset имеет id, vars, rule_set/dns_servers, rule/dns_rule. UI Library dialog
-	// показывает обе секции; preset-ref правила хранятся в state.RulesV6 (kind=preset).
+	// показывает обе секции; preset-ref правила хранятся в state.Rules (kind=preset).
 	Presets []Preset
 
 	// PresetWarnings — non-fatal warnings от LoadPresets (validation issues).

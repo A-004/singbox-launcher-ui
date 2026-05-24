@@ -42,7 +42,7 @@ func (p *Preset) PresetHasDNSRule() bool {
 // Использование:
 //
 //	m := template.PresetLiteMap(td.Presets)
-//	v6.SyncDNSOptionsWithActivePresets(state.RulesV6, &state.DNS, m)
+//	v6.SyncDNSOptionsWithActivePresets(state.Rules, &state.DNS, m)
 func PresetLiteMap(presets []Preset) map[string]v6.PresetLite {
 	out := make(map[string]v6.PresetLite, len(presets))
 	for i := range presets {

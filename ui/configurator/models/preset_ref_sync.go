@@ -3,7 +3,7 @@
 // Sync функции вызываются на Save (UI → state) и Load (state → UI). Это два
 // независимых поля рядом со старыми CustomRules/DNSOptions:
 //
-//	UI model.PresetRefs            <-> state.RulesV6 (kind=preset entries)
+//	UI model.PresetRefs            <-> state.Rules (kind=preset entries)
 //	UI model.DNSTemplateOverrides  <-> state.DNS.TemplateServers
 //
 // Подход «параллельное хранилище» нужен пока UI Rules tab продолжает
@@ -17,9 +17,9 @@ import (
 	v6 "singbox-launcher/core/state/v6"
 )
 
-// SyncAllRulesToStateRulesV6 — full sync model rules → state.RulesV6 (БЕЗ порядка).
+// SyncAllRulesToStateRulesV6 — full sync model rules → state.Rules (БЕЗ порядка).
 //
-// Кладёт в state.RulesV6:
+// Кладёт в state.Rules:
 //   - preset-ref'ы из model.PresetRefs как kind=preset (сначала)
 //   - inline/srs правила из model.CustomRules как kind=inline/srs (после)
 //
@@ -49,7 +49,7 @@ func SyncAllRulesToStateRulesV6(presetRefs []*PresetRefState, customRules []*Rul
 // SyncRulesByOrderToStateRulesV6 — sync с сохранением порядка RuleOrder.
 // Обходит slots в порядке RuleOrder, dispatch'ит по kind, эмитит v6.Rule.
 //
-// Гарантирует что state.RulesV6 имеет тот же порядок что UI Rules tab видит.
+// Гарантирует что state.Rules имеет тот же порядок что UI Rules tab видит.
 // Это критично для build pipeline (emit в правильном порядке) и round-trip
 // load→save→load (порядок не теряется).
 func SyncRulesByOrderToStateRulesV6(order []RuleSlot, presetRefs []*PresetRefState, customRules []*RuleState) []v6.Rule {
@@ -103,7 +103,7 @@ func jsonMarshalPreset(vars map[string]string) ([]byte, error) {
 }
 
 // RuleOrderFromStateRulesV6 — обратная конверсия: восстанавливает model.RuleOrder
-// из state.RulesV6, чтобы UI после load увидел правила в том же порядке как
+// из state.Rules, чтобы UI после load увидел правила в том же порядке как
 // они были при save.
 //
 // Параметры (presetRefs, customRules) должны быть уже заполнены (после
@@ -458,7 +458,7 @@ func SyncPresetRefsToStateRules(refs []*PresetRefState) []v6.Rule {
 	return out
 }
 
-// SyncStateRulesToPresetRefs — state → UI. Возвращает model.PresetRefs из state.RulesV6.
+// SyncStateRulesToPresetRefs — state → UI. Возвращает model.PresetRefs из state.Rules.
 // Только kind=preset попадают; остальные kind'ы (inline/srs) идут через legacy CustomRules
 // path (см. core/state/load.go::legacyCustomRulesFromV6).
 func SyncStateRulesToPresetRefs(rules []v6.Rule) []*PresetRefState {
