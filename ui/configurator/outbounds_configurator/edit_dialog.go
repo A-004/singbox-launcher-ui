@@ -16,6 +16,8 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
+	fynetooltip "github.com/dweymouth/fyne-tooltip"
+	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 
 	"singbox-launcher/core/build"
 	"singbox-launcher/core/config"
@@ -98,28 +100,42 @@ func ShowEditDialog(
 	commentEntry.SetPlaceHolder(locale.T("wizard.outbound.placeholder_comment"))
 
 	// SPEC: editable fields для urltest outbound options (interval/tolerance/url).
-	// Опции (preset values) берутся из template.vars[urltest_*]. SelectEntry —
-	// dropdown + free text input в одном виджете: юзер может выбрать из preset'ов
-	// или ввести custom значение.
+	// interval/tolerance — widget.Select (только dropdown, без свободного ввода);
+	// url — widget.SelectEntry (dropdown + ручной ввод, т.к. URL разнообразны).
+	// В каждый dropdown добавлен placeholder вида `@varname` чтобы юзер мог
+	// явно выбрать «inherit from Settings» (значение переменной из state.vars).
 	//
 	// Visible только когда Type=urltest (toggled via typeSelect.OnChanged ниже).
-	urltestIntervalEntry := widget.NewSelectEntry(templateVarOptions(editPresenter, "urltest_interval"))
-	urltestIntervalEntry.SetPlaceHolder("5m")
-	urltestToleranceEntry := widget.NewSelectEntry(templateVarOptions(editPresenter, "urltest_tolerance"))
-	urltestToleranceEntry.SetPlaceHolder("100")
-	urltestURLEntry := widget.NewSelectEntry(templateVarOptions(editPresenter, "urltest_url"))
-	urltestURLEntry.SetPlaceHolder("https://cp.cloudflare.com/generate_204")
-	// Populate из displayBody.Options если есть.
+	curInterval, curTolerance, curURL := "", "", ""
 	if displayBody != nil && displayBody.Options != nil {
 		if v, ok := displayBody.Options["interval"]; ok {
-			urltestIntervalEntry.SetText(fmt.Sprintf("%v", v))
+			curInterval = fmt.Sprintf("%v", v)
 		}
 		if v, ok := displayBody.Options["tolerance"]; ok {
-			urltestToleranceEntry.SetText(fmt.Sprintf("%v", v))
+			curTolerance = fmt.Sprintf("%v", v)
 		}
 		if v, ok := displayBody.Options["url"]; ok {
-			urltestURLEntry.SetText(fmt.Sprintf("%v", v))
+			curURL = fmt.Sprintf("%v", v)
 		}
+	}
+
+	intervalLabels, intervalLabelToValue := templateVarChoices(editPresenter, "urltest_interval", curInterval)
+	urltestIntervalSelect := widget.NewSelect(intervalLabels, nil)
+	if lbl := labelForValue(intervalLabelToValue, curInterval); lbl != "" {
+		urltestIntervalSelect.SetSelected(lbl)
+	}
+
+	toleranceLabels, toleranceLabelToValue := templateVarChoices(editPresenter, "urltest_tolerance", curTolerance)
+	urltestToleranceSelect := widget.NewSelect(toleranceLabels, nil)
+	if lbl := labelForValue(toleranceLabelToValue, curTolerance); lbl != "" {
+		urltestToleranceSelect.SetSelected(lbl)
+	}
+
+	urlLabels, _ := templateVarChoices(editPresenter, "urltest_url", curURL)
+	urltestURLEntry := widget.NewSelectEntry(urlLabels)
+	urltestURLEntry.SetPlaceHolder("https://cp.cloudflare.com/generate_204")
+	if curURL != "" {
+		urltestURLEntry.SetText(curURL)
 	}
 
 	// Scope: For all | For source: ...
@@ -314,19 +330,30 @@ func ShowEditDialog(
 		// SPEC: для urltest перезаписываем interval/tolerance/url из form fields
 		// (юзер мог изменить их через urltestBlock виджеты). Перезапись только
 		// для urltest type. Для selector — поля скрыты, не применяем.
+		//
+		// interval/tolerance — widget.Select: .Selected = label, lookup в
+		// labelToValue даёт raw value. URL — SelectEntry: читаем .Text напрямую
+		// (юзер мог ввести custom URL).
 		if obType == "urltest" {
 			if cfg.Options == nil {
 				cfg.Options = map[string]interface{}{}
 			}
-			if v := strings.TrimSpace(urltestIntervalEntry.Text); v != "" {
-				cfg.Options["interval"] = v
+			if lbl := urltestIntervalSelect.Selected; lbl != "" {
+				if v, ok := intervalLabelToValue[lbl]; ok && v != "" {
+					cfg.Options["interval"] = v
+				}
 			}
-			if v := strings.TrimSpace(urltestToleranceEntry.Text); v != "" {
-				// tolerance — число в template; пробуем как int, иначе кладём как строку
-				if n, err := strconv.Atoi(v); err == nil {
-					cfg.Options["tolerance"] = n
-				} else {
-					cfg.Options["tolerance"] = v
+			if lbl := urltestToleranceSelect.Selected; lbl != "" {
+				if v, ok := toleranceLabelToValue[lbl]; ok && v != "" {
+					// tolerance — число в template; placeholder @urltest_tolerance
+					// оставляем строкой (substituter резолвит на build time).
+					if strings.HasPrefix(v, "@") {
+						cfg.Options["tolerance"] = v
+					} else if n, err := strconv.Atoi(v); err == nil {
+						cfg.Options["tolerance"] = n
+					} else {
+						cfg.Options["tolerance"] = v
+					}
 				}
 			}
 			if v := strings.TrimSpace(urltestURLEntry.Text); v != "" {
@@ -440,14 +467,19 @@ func ShowEditDialog(
 	}
 
 	// Urltest-specific options block. Видим только когда Type=urltest.
+	// Tooltip объясняет что @varname placeholder означает inherit из Settings tab.
+	const urltestTooltip = "Pick a preset value or select @varname to inherit the value from Settings tab (substituted at build time)."
 	urltestLabel := widget.NewLabel("URLTest options")
-	urltestIntervalLabel := widget.NewLabel("Interval")
-	urltestToleranceLabel := widget.NewLabel("Tolerance (ms)")
-	urltestURLLabel := widget.NewLabel("URL")
+	urltestIntervalLabel := ttwidget.NewLabel("Interval")
+	urltestIntervalLabel.SetToolTip(urltestTooltip)
+	urltestToleranceLabel := ttwidget.NewLabel("Tolerance (ms)")
+	urltestToleranceLabel.SetToolTip(urltestTooltip)
+	urltestURLLabel := ttwidget.NewLabel("URL")
+	urltestURLLabel.SetToolTip(urltestTooltip)
 	urltestBlock := container.NewVBox(
 		urltestLabel,
-		container.NewGridWithColumns(2, urltestIntervalLabel, urltestIntervalEntry),
-		container.NewGridWithColumns(2, urltestToleranceLabel, urltestToleranceEntry),
+		container.NewGridWithColumns(2, urltestIntervalLabel, urltestIntervalSelect),
+		container.NewGridWithColumns(2, urltestToleranceLabel, urltestToleranceSelect),
 		container.NewGridWithColumns(2, urltestURLLabel, urltestURLEntry),
 	)
 	urltestVisible := func() {
@@ -670,6 +702,11 @@ func ShowEditDialog(
 
 	// syncRawToForm parses the Raw tab JSON and updates Settings form fields (tag, type, comment, filters, etc.).
 	// Called when user switches from Raw to Settings so the form reflects the raw JSON.
+	//
+	// SPEC 058-R-N: для referenced entries (cfg.Ref != "") Raw содержит thin
+	// shape (tag+ref+updates без body) — populate из этого даст пустую форму.
+	// Re-merge с template: build.MergeOutboundUpdates резолвит base body и
+	// applies updates → получаем full merged view для populate.
 	syncRawToForm := func() {
 		var cfg config.OutboundConfig
 		if err := json.Unmarshal([]byte(rawEntry.Text), &cfg); err != nil {
@@ -678,24 +715,31 @@ func ShowEditDialog(
 		if strings.TrimSpace(cfg.Tag) == "" {
 			return
 		}
-		tagEntry.SetText(cfg.Tag)
-		if cfg.Type == "urltest" {
+		// Re-merge для referenced entries — иначе форма обнуляется.
+		display := cfg
+		if cfg.Ref != "" && editPresenter != nil {
+			if m := editPresenter.Model(); m != nil {
+				display = build.MergeOutboundUpdates(cfg, m.TemplateData)
+			}
+		}
+		tagEntry.SetText(display.Tag)
+		if display.Type == "urltest" {
 			typeSelect.SetSelected(locale.T("wizard.outbound.type_auto"))
 		} else {
 			typeSelect.SetSelected(locale.T("wizard.outbound.type_manual"))
 		}
-		commentEntry.SetText(cfg.Comment)
+		commentEntry.SetText(display.Comment)
 		filterValEntry.SetText("")
-		if cfg.Filters != nil {
-			if v, ok := cfg.Filters["tag"]; ok {
+		if display.Filters != nil {
+			if v, ok := display.Filters["tag"]; ok {
 				if s, ok := v.(string); ok {
 					filterValEntry.SetText(s)
 				}
 			}
 		}
 		defValEntry.SetText("")
-		if cfg.PreferredDefault != nil {
-			if v, ok := cfg.PreferredDefault["tag"]; ok {
+		if display.PreferredDefault != nil {
+			if v, ok := display.PreferredDefault["tag"]; ok {
 				if s, ok := v.(string); ok {
 					defValEntry.SetText(s)
 				}
@@ -706,8 +750,8 @@ func ShowEditDialog(
 		for _, c := range otherTagChecks {
 			c.SetChecked(false)
 		}
-		if len(cfg.AddOutbounds) > 0 {
-			for _, t := range cfg.AddOutbounds {
+		if len(display.AddOutbounds) > 0 {
+			for _, t := range display.AddOutbounds {
 				if t == "direct-out" {
 					directCheck.SetChecked(true)
 				} else if t == "reject" {
@@ -715,6 +759,23 @@ func ShowEditDialog(
 				} else if c, ok := otherTagsMap[t]; ok {
 					c.SetChecked(true)
 				}
+			}
+		}
+		// urltest fields — для referenced merged.Options содержит финальные
+		// значения (template + preset patches + USER patch).
+		if display.Options != nil {
+			if v, ok := display.Options["interval"]; ok {
+				if lbl := labelForValue(intervalLabelToValue, fmt.Sprintf("%v", v)); lbl != "" {
+					urltestIntervalSelect.SetSelected(lbl)
+				}
+			}
+			if v, ok := display.Options["tolerance"]; ok {
+				if lbl := labelForValue(toleranceLabelToValue, fmt.Sprintf("%v", v)); lbl != "" {
+					urltestToleranceSelect.SetSelected(lbl)
+				}
+			}
+			if v, ok := display.Options["url"]; ok {
+				urltestURLEntry.SetText(fmt.Sprintf("%v", v))
 			}
 		}
 	}
@@ -792,13 +853,17 @@ func ShowEditDialog(
 	if editPresenter != nil {
 		editPresenter.SetOutboundEditWindow(dialogWin)
 		dialogWin.SetOnClosed(func() {
+			fynetooltip.DestroyWindowToolTipLayer(dialogWin.Canvas())
 			editPresenter.ClearOutboundEditWindow()
 			editPresenter.UpdateChildOverlay()
 		})
 	}
 	dialogWin.Resize(fyne.NewSize(440, 560))
 	dialogWin.CenterOnScreen()
-	dialogWin.SetContent(mainContent)
+	// fynetooltip layer обязателен для tooltips на ttwidget виджетах в
+	// отдельном окне — без него fyne-tooltip пишет "no tool tip layer
+	// created for current overlay" и tooltips не показываются.
+	dialogWin.SetContent(fynetooltip.AddWindowToolTipLayer(mainContent, dialogWin.Canvas()))
 	dialogWin.Show()
 	if editPresenter != nil {
 		editPresenter.UpdateChildOverlay()
@@ -808,23 +873,66 @@ func ShowEditDialog(
 // filterOutUserPatch returns Updates with USER patch entry removed (preset
 // patches kept). Используется в diff computation: merged_base = template body +
 // active preset patches (БЕЗ USER patch — он и есть результат текущего edit).
-// templateVarOptions возвращает options[] из template var по имени. Используется
-// для populate SelectEntry виджетов urltest полей. Если var не найден или нет
-// options — возвращает пустой slice (SelectEntry показывает просто text input).
-func templateVarOptions(editPresenter OutboundEditPresenter, varName string) []string {
-	if editPresenter == nil {
-		return nil
-	}
-	m := editPresenter.Model()
-	if m == nil || m.TemplateData == nil {
-		return nil
-	}
-	for _, v := range m.TemplateData.Vars {
-		if v.Name == varName {
-			return v.Options
+// templateVarChoices строит (labels, labelToValue) для dropdown'а на основе
+// template var. Семантика:
+//   - labels[0] = "@varname" placeholder — позволяет выбрать «inherit from
+//     Settings» (substituter резолвит в текущее значение state.vars[var]).
+//   - labels[1..] = OptionTitles если есть, иначе raw values (mirror того что
+//     Settings tab показывает).
+//   - currentValue добавляется в конец списка если не matchится ни с placeholder
+//     ни с template options — preserve юзерское custom value (например, юзер
+//     раньше ввёл нестандартное "7m" — не теряем).
+//   - labelToValue: label → raw value (для save mapping).
+func templateVarChoices(editPresenter OutboundEditPresenter, varName, currentValue string) ([]string, map[string]string) {
+	placeholder := "@" + varName
+	labels := []string{placeholder}
+	labelToValue := map[string]string{placeholder: placeholder}
+
+	if editPresenter != nil {
+		if m := editPresenter.Model(); m != nil && m.TemplateData != nil {
+			for _, v := range m.TemplateData.Vars {
+				if v.Name != varName {
+					continue
+				}
+				for i, opt := range v.Options {
+					label := opt
+					if i < len(v.OptionTitles) && v.OptionTitles[i] != "" {
+						label = v.OptionTitles[i]
+					}
+					labels = append(labels, label)
+					labelToValue[label] = opt
+				}
+				break
+			}
 		}
 	}
-	return nil
+
+	// Preserve custom currentValue если не среди известных options/placeholder.
+	if currentValue != "" {
+		found := false
+		for _, val := range labelToValue {
+			if val == currentValue {
+				found = true
+				break
+			}
+		}
+		if !found {
+			labels = append(labels, currentValue)
+			labelToValue[currentValue] = currentValue
+		}
+	}
+	return labels, labelToValue
+}
+
+// labelForValue ищет label соответствующий значению value в map. Возвращает
+// первый matching label или пустую строку.
+func labelForValue(labelToValue map[string]string, value string) string {
+	for label, val := range labelToValue {
+		if val == value {
+			return label
+		}
+	}
+	return ""
 }
 
 func filterOutUserPatch(updates []config.OutboundUpdate) []config.OutboundUpdate {
