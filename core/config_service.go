@@ -761,8 +761,22 @@ func refreshOneSubscriptionSource(src *state.Source, defaults state.Defaults, su
 		src.Meta.LastStatus = "err"
 		src.Meta.ErrorCount++
 		src.Meta.LastErrorMsg = fetchErr.Error()
+		// SPEC 061: surface the structured announce on either error variant
+		// so UI can render an actionable dialog with the provider message +
+		// clickable URL, not just a flat error label.
+		src.Meta.ProviderAnnounce = nil
+		src.Meta.LastErrorURL = ""
+		if ae, ok := subscription.IsAnnounceError(fetchErr); ok {
+			a := ae.Announce
+			src.Meta.ProviderAnnounce = &a
+			src.Meta.LastErrorURL = a.URL
+		}
 		if httpErr, ok := subscription.IsHTTPError(fetchErr); ok {
 			src.Meta.HTTPStatusCode = httpErr.StatusCode
+			if httpErr.Announce != nil && !httpErr.Announce.IsEmpty() {
+				src.Meta.ProviderAnnounce = httpErr.Announce
+				src.Meta.LastErrorURL = httpErr.Announce.URL
+			}
 		} else if res != nil {
 			src.Meta.HTTPStatusCode = res.HTTPStatus
 		}
@@ -780,8 +794,12 @@ func refreshOneSubscriptionSource(src *state.Source, defaults state.Defaults, su
 	merged.LastStatus = "ok"
 	merged.ErrorCount = 0
 	merged.LastErrorMsg = ""
+	merged.LastErrorURL = ""
 	merged.HTTPStatusCode = res.HTTPStatus
 	merged.RawBodyBytes = res.RawBodyBytes
+	// ProviderAnnounce on success — only when the provider actually sent
+	// announce headers (already populated by ParseHeaders / ParseInlineComments
+	// into res.Meta). Otherwise stays nil so UI clears the 📢 badge.
 	// SPEC 054: для Xray JSON array подписок line-based extractPreviewNodes
 	// раздувал preview_nodes в 50 раз (одна "line" = весь JSON body ~1MB).
 	// Сначала пробуем формат-aware path через xray JSON parser; fallback на

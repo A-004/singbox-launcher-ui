@@ -351,6 +351,91 @@ func TestParseAnnounce_NilAndEmpty(t *testing.T) {
 	}
 }
 
+// TestParseAnnounce_HWIDFlagMatrix — all 4 HWID-* flags parse independently
+// (truthy / falsy / missing) and the legacy `X-Hwid-Limit` ↔
+// `X-Hwid-Max-Devices-Reached` alias mirrors both ways.
+func TestParseAnnounce_HWIDFlagMatrix(t *testing.T) {
+	cases := []struct {
+		name       string
+		headers    map[string]string
+		wantActive bool
+		wantNotSup bool
+		wantMax    bool
+		wantLimit  bool
+	}{
+		{
+			name:       "all four flags set",
+			headers:    map[string]string{"X-Hwid-Active": "true", "X-Hwid-Not-Supported": "1", "X-Hwid-Max-Devices-Reached": "yes", "X-Hwid-Limit": "on"},
+			wantActive: true, wantNotSup: true, wantMax: true, wantLimit: true,
+		},
+		{
+			name:       "legacy X-Hwid-Limit only → mirrors to MaxDevicesReached",
+			headers:    map[string]string{"X-Hwid-Limit": "true"},
+			wantMax:    true, wantLimit: true,
+		},
+		{
+			name:       "modern X-Hwid-Max-Devices-Reached only → mirrors to Limit",
+			headers:    map[string]string{"X-Hwid-Max-Devices-Reached": "true"},
+			wantMax:    true, wantLimit: true,
+		},
+		{
+			name:       "active without limit (informational badge)",
+			headers:    map[string]string{"X-Hwid-Active": "true"},
+			wantActive: true,
+		},
+		{
+			name:       "not-supported alone (panel says we forgot X-Hwid)",
+			headers:    map[string]string{"X-Hwid-Not-Supported": "true"},
+			wantNotSup: true,
+		},
+		{
+			name:    "all falsy / missing → no flags",
+			headers: map[string]string{"X-Hwid-Active": "false", "X-Hwid-Limit": "0"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := http.Header{}
+			for k, v := range c.headers {
+				h.Set(k, v)
+			}
+			a := ParseAnnounce(h)
+			if a.HWIDActive != c.wantActive {
+				t.Errorf("HWIDActive = %v, want %v", a.HWIDActive, c.wantActive)
+			}
+			if a.HWIDNotSupported != c.wantNotSup {
+				t.Errorf("HWIDNotSupported = %v, want %v", a.HWIDNotSupported, c.wantNotSup)
+			}
+			if a.HWIDMaxDevicesReached != c.wantMax {
+				t.Errorf("HWIDMaxDevicesReached = %v, want %v", a.HWIDMaxDevicesReached, c.wantMax)
+			}
+			if a.HWIDLimit != c.wantLimit {
+				t.Errorf("HWIDLimit = %v, want %v", a.HWIDLimit, c.wantLimit)
+			}
+		})
+	}
+}
+
+// TestParseInlineComments_Announce — SPEC 061 §5: announce / announce-url
+// also arrive as `#announce:` / `#announce-url:` inline on static hosts.
+func TestParseInlineComments_Announce(t *testing.T) {
+	body := []byte(
+		"#announce: Trial expires in 3 days. Renew at link below.\n" +
+			"#announce-url: https://example.com/renew\n" +
+			"vless://uuid@host:443#tokyo\n",
+	)
+	m := ParseInlineComments(body)
+	if m.ProviderAnnounce == nil {
+		t.Fatalf("ProviderAnnounce nil; meta = %+v", m)
+	}
+	if m.ProviderAnnounce.Message != "Trial expires in 3 days. Renew at link below." {
+		t.Errorf("Message = %q", m.ProviderAnnounce.Message)
+	}
+	if m.ProviderAnnounce.URL != "https://example.com/renew" {
+		t.Errorf("URL = %q", m.ProviderAnnounce.URL)
+	}
+}
+
 func isEmptyMeta(m state.SubscriptionMeta) bool {
 	return m.UserInfo == nil &&
 		m.ProfileTitle == "" &&
@@ -363,9 +448,11 @@ func isEmptyMeta(m state.SubscriptionMeta) bool {
 		m.LastStatus == "" &&
 		m.ErrorCount == 0 &&
 		m.LastErrorMsg == "" &&
+		m.LastErrorURL == "" &&
 		m.HTTPStatusCode == 0 &&
 		m.RawBodyBytes == 0 &&
 		m.NodesCountFetched == 0 &&
 		!m.Truncated &&
-		len(m.PreviewNodes) == 0
+		len(m.PreviewNodes) == 0 &&
+		m.ProviderAnnounce.IsEmpty()
 }

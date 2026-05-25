@@ -277,6 +277,42 @@ func TestFetchSubscription_HWIDHeadersDisabled(t *testing.T) {
 	}
 }
 
+// TestFetchSubscription_HTTPErrorWithAnnounce — SPEC 061: non-200 + announce
+// headers (e.g. 403 + "region blocked, see @bot") attaches the parsed
+// announce to FetchHTTPError and Error() includes the message + URL.
+func TestFetchSubscription_HTTPErrorWithAnnounce(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Announce", "Region blocked. Contact support.")
+		w.Header().Set("Announce-Url", "https://t.me/support_bot")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	_, err := FetchSubscriptionWithMeta(srv.URL)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	httpErr, ok := IsHTTPError(err)
+	if !ok {
+		t.Fatalf("expected *FetchHTTPError, got %T", err)
+	}
+	if httpErr.Announce == nil {
+		t.Fatalf("Announce nil on 403 with announce headers")
+	}
+	if httpErr.Announce.Message != "Region blocked. Contact support." {
+		t.Errorf("Message = %q", httpErr.Announce.Message)
+	}
+	if httpErr.Announce.URL != "https://t.me/support_bot" {
+		t.Errorf("URL = %q", httpErr.Announce.URL)
+	}
+	msg := err.Error()
+	for _, want := range []string{"403", "Region blocked", "https://t.me/support_bot"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("Error() = %q, missing %q", msg, want)
+		}
+	}
+}
+
 // TestFetchSubscription_HWIDHeadersHashedModel — hashed mode replaces the
 // raw model string with sha256(model)[:16] = exactly 16 lowercase hex chars.
 func TestFetchSubscription_HWIDHeadersHashedModel(t *testing.T) {

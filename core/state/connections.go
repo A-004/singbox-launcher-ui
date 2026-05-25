@@ -112,6 +112,18 @@ type SubscriptionMeta struct {
 	NodesCountFetched int      `json:"nodes_count_fetched,omitempty"`
 	Truncated         bool     `json:"truncated,omitempty"` // обрезали по max_nodes
 	PreviewNodes      []string `json:"preview_nodes,omitempty"`
+
+	// SPEC 061: provider sent announce headers (success **or** failure).
+	// nil → no announce on last fetch. UI renders ⚠ icon when LastStatus="err"
+	// and 📢 icon when LastStatus="ok" but this field is non-nil. Cleared on
+	// a clean successful refresh with no announce headers.
+	ProviderAnnounce *ProviderAnnounce `json:"provider_announce,omitempty"`
+
+	// LastErrorURL — convenience snapshot of ProviderAnnounce.URL (or other
+	// actionable URL on the last error). Surfaces in simpler UI affordances
+	// (status tooltip, log message) without having to dereference
+	// ProviderAnnounce. Empty on success or when provider gave no URL.
+	LastErrorURL string `json:"last_error_url,omitempty"`
 }
 
 // UserInfo — раскрытый subscription-userinfo header (V2Board / Xboard).

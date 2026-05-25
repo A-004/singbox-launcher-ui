@@ -123,16 +123,28 @@ type FetchResult struct {
 
 // FetchHTTPError — ошибка с не-200 status code; можно использовать
 // errors.As для извлечения StatusCode при формировании meta.error_count.
+//
+// SPEC 061: на 403/410/429/5xx провайдер может приложить announce-headers
+// («region blocked → @bot»). Парсим их в Announce поле — UI отрисует тот же
+// actionable диалог, что и для FetchAnnounceError.
 type FetchHTTPError struct {
 	StatusCode int
 	Hint       string
+	Announce   *state.ProviderAnnounce
 }
 
 func (e *FetchHTTPError) Error() string {
-	if e.Hint == "" {
-		return fmt.Sprintf("subscription server returned status %d", e.StatusCode)
+	base := fmt.Sprintf("subscription server returned status %d", e.StatusCode)
+	if e.Hint != "" {
+		base += " (" + e.Hint + ")"
 	}
-	return fmt.Sprintf("subscription server returned status %d (%s)", e.StatusCode, e.Hint)
+	if e.Announce != nil && !e.Announce.IsEmpty() && e.Announce.Message != "" {
+		base += ": " + e.Announce.Message
+	}
+	if e.Announce != nil && e.Announce.URL != "" {
+		base += "  →  " + e.Announce.URL
+	}
+	return base
 }
 
 // FetchAnnounceError — провайдер вернул HTTP 200 с **пустым телом** и
@@ -157,7 +169,7 @@ func (e *FetchHTTPError) Error() string {
 //	    announce-url: https://example.com/renew
 //	    Body: 0 bytes
 type FetchAnnounceError struct {
-	Announce ProviderAnnounce
+	Announce state.ProviderAnnounce
 }
 
 func (e *FetchAnnounceError) Error() string {
@@ -170,8 +182,10 @@ func (e *FetchAnnounceError) Error() string {
 	switch {
 	case a.Message != "":
 		b.WriteString(a.Message)
-	case a.HWIDLimit:
+	case a.HWIDMaxDevicesReached || a.HWIDLimit:
 		b.WriteString("subscription provider reports HWID/device limit reached")
+	case a.HWIDNotSupported:
+		b.WriteString("subscription provider says HWID identification is missing — check 'Send device identification' in Settings")
 	default:
 		b.WriteString("subscription provider returned empty body with announce header")
 	}
@@ -222,10 +236,18 @@ func FetchSubscriptionWithMeta(url string) (*FetchResult, error) {
 	result := &FetchResult{HTTPStatus: resp.StatusCode}
 
 	if resp.StatusCode != http.StatusOK {
-		return result, &FetchHTTPError{
+		httpErr := &FetchHTTPError{
 			StatusCode: resp.StatusCode,
 			Hint:       explainHTTPStatus(resp.StatusCode),
 		}
+		// SPEC 061: announce headers on non-200 (e.g. 403 + "region blocked,
+		// see @bot"). Attach so UI can render the actionable dialog instead
+		// of a flat "HTTP 403".
+		if a := ParseAnnounce(resp.Header); !a.IsEmpty() {
+			ac := a
+			httpErr.Announce = &ac
+		}
+		return result, httpErr
 	}
 
 	limited := io.LimitReader(resp.Body, MaxSubscriptionResponseSize+1)
