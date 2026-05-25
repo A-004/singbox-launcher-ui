@@ -162,10 +162,13 @@ Settings (Phase 4):
 
 ### Phase 3 — UI surfacing
 
+UX-паттерн зеркалит нашу ⚠ кнопку у Rules-with-missing-SRS (commit `c19dccc`): icon-button прямо в row списка, click → modal с подробностями + actionable URL. Это **persistent visual** — не одноразовое уведомление при Update, а постоянный маркер пока ошибка актуальна.
+
 | Файл | Что |
 |---|---|
-| `ui/configurator/...` | Если `SubscriptionMeta.ProviderAnnounce` не nil — показывать badge в Sources tab под source row: `📢 NashVPN: Вы достигли лимита устройств → @nash_vpn_bot`. URL кликабельный. |
-| `ui/configurator/tabs/source_tab.go` | На fetch failure через `FetchAnnounceError` — диалог с decoded announce + actionable button «открыть Announce-Url». |
+| `ui/configurator/tabs/source_tab.go` | **Источник в state ошибки** (`meta.LastStatus == "err"`) → в right-cluster row'а **⚠ icon-button** (`ttwidget.NewButtonWithIcon`, WarningImportance). Tooltip: «Subscription update failed — click for details». Click → `showSourceErrorDialog(parent, source)`. <br><br>**Источник с warning announce** (fetch успешен, но `meta.ProviderAnnounce` не nil — провайдер дополнительно прислал announce при contentful body) → **📢 icon-button** в том же месте, MediumImportance. Tooltip: «Provider sent a notice — click to read». Тот же диалог. |
+| `ui/configurator/dialogs/source_error_dialog.go` (новый) | Modal с layout: <br>• Title: `ProfileTitle` (or source label fallback) <br>• HTTP status line: «HTTP 200 · empty body» / «HTTP 403 · forbidden» <br>• Decoded announce message (multi-line, TextWrapWord) <br>• Если есть `Announce-Url` валидной schemes (`http`/`https`/`tg`) — кнопка **🔗 Open <hostname>** (вызов `fyne.CurrentApp().OpenURL`). Невалид → URL plain-text без кнопки. <br>• Meta-info footer: «Last attempt: <RFC3339>», «Errors in a row: N». <br>• Кнопка Close. |
+| Auto-open поведение | На Update flow — если результат `FetchAnnounceError`/`FetchHTTPError.Announce` → автоматически открыть `showSourceErrorDialog` (как делает ⬇srs failure dialog для manual click). Это покрывает «first encounter» UX без дополнительного клика по ⚠. |
 
 ### Phase 4 — Settings (privacy opt-out + advanced editing)
 
