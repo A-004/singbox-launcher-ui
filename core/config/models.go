@@ -13,7 +13,6 @@ type ParsedNode = configtypes.ParsedNode
 type ParsedJump = configtypes.ParsedJump
 
 const ParserConfigVersion = configtypes.ParserConfigVersion
-const SubscriptionUserAgent = configtypes.SubscriptionUserAgent
 const MaxNodesPerSubscription = configtypes.MaxNodesPerSubscription
 const UnsetSourceIndex = configtypes.UnsetSourceIndex
 

@@ -2,6 +2,8 @@ package subscription
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"singbox-launcher/core/config/configtypes"
 	"singbox-launcher/core/state"
 	"singbox-launcher/internal/debuglog"
+	"singbox-launcher/internal/platform"
 )
 
 // NetworkRequestTimeout defines the timeout for network requests
@@ -51,6 +54,50 @@ var IsNetworkErrorFunc func(err error) bool
 
 // GetNetworkErrorMessageFunc is a function variable that should be set to core.GetNetworkErrorMessage
 var GetNetworkErrorMessageFunc func(err error) string
+
+// SubscriptionRequestSettings — minimal settings surface needed by fetcher
+// to build HWID-family request headers without importing internal/locale.
+//
+// Wired by core init (config_service.go) — same pattern as CreateHTTPClientFunc.
+// The hook returns a snapshot (value copy of relevant fields) so concurrent
+// settings edits don't race with an in-flight fetch.
+type SubscriptionRequestSettings struct {
+	HWID              string
+	SendHWID          bool
+	DeviceModelHashed bool
+}
+
+// LoadSubscriptionSettingsFunc is set by core init to read bin/settings.json
+// for the HWID-family headers. nil → fetcher sends no HWID headers (no-op
+// for non-HWID providers; HWID-binding panels respond with empty body, but
+// that's the same behavior as `subscription_send_hwid=false`).
+var LoadSubscriptionSettingsFunc func() SubscriptionRequestSettings
+
+// applySubscriptionRequestHeaders sets User-Agent + (when enabled) the four
+// X-Hwid-family headers on an outbound subscription request. Centralized so
+// FetchSubscriptionWithMeta and the legacy FetchSubscription wrapper stay
+// in lockstep — see SPEC 061 §"Request headers".
+func applySubscriptionRequestHeaders(req *http.Request) {
+	req.Header.Set("User-Agent", configtypes.BuildSubscriptionUserAgent())
+	if LoadSubscriptionSettingsFunc == nil {
+		return
+	}
+	s := LoadSubscriptionSettingsFunc()
+	if !s.SendHWID || s.HWID == "" {
+		return
+	}
+	req.Header.Set("X-Hwid", s.HWID)
+	req.Header.Set("X-Device-OS", platform.DeviceOS())
+	req.Header.Set("X-Ver-OS", platform.DeviceOSVersion())
+	model := platform.DeviceModel()
+	if s.DeviceModelHashed && model != "" {
+		sum := sha256.Sum256([]byte(model))
+		// 8 bytes = 16 hex chars — stable opaque ID per Remnawave HWID docs
+		// "hashed model" mode (caller knows exactly the field width).
+		model = hex.EncodeToString(sum[:8])
+	}
+	req.Header.Set("X-Device-Model", model)
+}
 
 // MaxSubscriptionResponseSize — лимит размера ответа от провайдера подписки.
 // Защита от memory exhaustion на патологически больших телах.
@@ -159,7 +206,7 @@ func FetchSubscriptionWithMeta(url string) (*FetchResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("User-Agent", configtypes.SubscriptionUserAgent)
+	applySubscriptionRequestHeaders(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -281,8 +328,9 @@ func FetchSubscription(url string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set user agent to avoid server detecting sing-box and returning JSON config
-	req.Header.Set("User-Agent", configtypes.SubscriptionUserAgent)
+	// SPEC 061 §"Request headers": singbox-launcher/<v> (<os> <arch>) UA +
+	// X-Hwid-family (when the user hasn't opted out via Settings).
+	applySubscriptionRequestHeaders(req)
 
 	resp, err := client.Do(req)
 	defer func() {

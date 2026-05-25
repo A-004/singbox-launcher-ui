@@ -5,16 +5,60 @@
 package configtypes
 
 import (
+	"fmt"
 	"net/url"
+	"runtime"
+	"strings"
 	"time"
+
+	"singbox-launcher/internal/constants"
 )
 
 // ParserConfigVersion is the current version of ParserConfig format
 const ParserConfigVersion = 4
 
-// SubscriptionUserAgent is the User-Agent string used for fetching subscriptions
-// Using neutral User-Agent to avoid server detecting sing-box and returning JSON config
-const SubscriptionUserAgent = "SubscriptionParserClient"
+// canonicalGOOSName returns the canonical-case OS name used in our
+// subscription request headers (`X-Device-OS`) and User-Agent.
+//
+// Form is `macOS` / `windows` / `linux` to match the Remnawave HWID docs
+// (https://docs.rw/docs/features/hwid-device-limit/), which is the panel
+// generation that actually parses these fields. Unknown GOOS (rare:
+// `freebsd`, `netbsd`, …) falls through unchanged — better than masking
+// it as "linux" and breaking eventual support if those builds ship.
+func canonicalGOOSName(goos string) string {
+	switch goos {
+	case "darwin":
+		return "macOS"
+	case "windows":
+		return "windows"
+	case "linux":
+		return "linux"
+	default:
+		return goos
+	}
+}
+
+// BuildSubscriptionUserAgent returns the User-Agent string sent on every
+// subscription fetch. Format follows the de-facto product/version (platform)
+// convention used by Mozilla / v2rayNG / hiddify and required by HWID-binding
+// panels (Remnawave / Marzneshin) which reject unknown clients like our
+// previous `SubscriptionParserClient` and return 0-byte bodies.
+//
+// Examples:
+//
+//	singbox-launcher/0.9.8 (macOS arm64)
+//	singbox-launcher/0.9.8 (windows amd64)
+//	singbox-launcher/0.9.8 (linux amd64)
+//
+// See SPEC 061-F-N §"Request headers" §1.
+func BuildSubscriptionUserAgent() string {
+	ver := strings.TrimSpace(constants.AppVersion)
+	ver = strings.TrimPrefix(ver, "v")
+	if ver == "" {
+		ver = "unknown"
+	}
+	return fmt.Sprintf("singbox-launcher/%s (%s %s)", ver, canonicalGOOSName(runtime.GOOS), runtime.GOARCH)
+}
 
 // MaxNodesPerSubscription limits the maximum number of nodes parsed from a single subscription
 // This prevents memory issues with very large subscriptions
