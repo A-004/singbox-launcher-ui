@@ -8,6 +8,20 @@
 
 ---
 
+### Выжимка (RU) — v0.9.7
+
+Quality-of-life релиз поверх v0.9.6: появился **Профайлер трафика** (новое окно с вкладки Diagnostics — live DNS/TCP/UDP события с привязкой к процессам, per-process recording, verbose toggle). Починили две неприятные регрессии — user-добавленные **DNS-серверы и правила** больше не пропадают после reopen configurator'а, и dropdown «Saved states» на главном экране теперь спрашивает перед перезаписью текущего state.json (раньше тихо стирал). **Правила** стали понятнее: preset-правила из библиотеки префиксованы 🔗, а если у enabled preset'а .srs файл не скачан — появляется ⚠ и launcher тихо скачивает в фоне. Debug API получил ~15 новых endpoint'ов по SPEC 053–059 для скриптинга/автоматизации.
+
+**Полный список изменений:** [docs/release_notes/0-9-7.md](docs/release_notes/0-9-7.md).
+
+### Highlights (EN) — v0.9.7
+
+Quality-of-life release on top of v0.9.6: **Traffic Profiler** ships (new window from the Diagnostics tab — live DNS/TCP/UDP events with process attribution, per-process recording, verbose toggle). Two nasty regressions fixed — user-added **DNS servers and rules** no longer vanish after reopening the configurator, and the **Saved-states** dropdown on the main screen now prompts before overwriting the current state.json (previously silent wipe). **Rules tab** got clearer: preset-library rules are prefixed with 🔗, and if an enabled preset's .srs file isn't downloaded yet a ⚠ badge appears while the launcher silently fetches it in the background. Debug API gains ~15 new endpoints covering SPEC 053–059 for scripting and automation.
+
+**Full changelog:** [docs/release_notes/0-9-7.md](docs/release_notes/0-9-7.md).
+
+---
+
 ### Выжимка (RU) — v0.9.6
 
 Пресеты теперь делают всё сразу: один клик — и preset настраивает DNS, добавляет правила маршрутизации, добавляет нужные outbound'ы и патчит существующие. Выключаешь preset — всё чисто исчезает. Правила в твоей конфигурации больше не копии, а ссылки на template — обновления template приходят к тебе автоматически. Outbounds стали гибче: удалять можно любой кроме одного защищённого (`proxy-out` 🔒), а случайно удалённые template-outbound'ы возвращаются одним кликом по кнопке «Restore missing». DNS почищен — убран мёртвый чекбокс `independent_cache` (sing-box 1.14 deprecation) и лишние дефолтные DNS-серверы.
