@@ -442,6 +442,7 @@
   "wizard.rules.empty_state": "No route rules yet. Open the library or add a custom rule.",
   "wizard.rules.empty_open_library": "Open library",
   "wizard.rules.tooltip_rule_enabled": "Include this rule in the generated route when enabled",
+  "wizard.rules.tooltip_srs_missing_enabled": "Rule-set file not downloaded — this rule won't work until the SRS is fetched. The launcher is downloading it in the background; you can also click ⬇ srs to retry.",
   "wizard.rules.tooltip_move_up": "Move rule up in the list",
   "wizard.rules.tooltip_move_down": "Move rule down in the list",
   "wizard.rules.tooltip_move_up_off": "Already the first rule",
