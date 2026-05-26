@@ -8,6 +8,20 @@
 
 ---
 
+### Выжимка (RU) — v0.9.8.1
+
+Hotfix поверх v0.9.8 — пользовательские SRS-правила теперь работают end-to-end. До этого релиза user-добавленное SRS-правило либо теряло скачанный `.srs` файл при следующем rebuild (orphan GC мисматчил filename), либо — после file-name фикса в v0.9.8 — при повторном открытии диалога редактирования молча переключалось в "Custom JSON" с пустым body. Оба пути закрыты; других изменений поведения нет.
+
+**Полный список изменений:** [docs/release_notes/0-9-8-1.md](docs/release_notes/0-9-8-1.md).
+
+### Highlights (EN) — v0.9.8.1
+
+Hotfix on top of v0.9.8 — user-defined SRS rules now actually work end-to-end. Before this release a user-added SRS rule would either lose its downloaded `.srs` file at the next rebuild (orphan GC mismatched filename), or — after the file-name fix in v0.9.8 — reopen the rule editor and find the type silently switched to "Custom JSON" with an empty body. Both paths are closed; no other behavior changes.
+
+**Full changelog:** [docs/release_notes/0-9-8-1.md](docs/release_notes/0-9-8-1.md).
+
+---
+
 ### Выжимка (RU) — v0.9.8
 
 Plumbing + quality релиз поверх v0.9.7: **sing-box обновлён до 1.13.12** на modern и Win7-legacy сборках, **Win7-релиз теперь корректно показывает версию** (раньше шёл с `v-local-test` из-за бага в CI ldflags), задокументирован **workaround OpenGL через Mesa3D** для старого Win7-железа (Intel HD 1xxx-2xxx), **главное окно теперь работает параллельно с конфигуратором** (был невидимый overlay, который перехватывал клики), **вкладка DNS Rules стала единым ordered списком** с drag ↑↓ (preset 🔗 и user → правила можно перемешивать). За кулисами: **README переписан** вокруг platform-level позиционирования с 6 hero-скриншотами + 3 независимых CI-бага найдены и исправлены (Win7 ldflags инжектил в несуществующий символ, Windows test-фейлы молча проглатывались `set ERRORLEVEL` трапом, Linux/macOS падал на `.gitignore`-проглоченной фикстуре).
