@@ -428,6 +428,8 @@
   "wizard.dns.tooltip_server_enabled": "Включить этот сервер в итоговый sing-box DNS. Отключённые остаются в списке и в state; в правилах и Final допускаются только включённые теги.",
   "wizard.dns.tooltip_server_locked": "Строка из config.dns шаблона: нельзя редактировать, удалить или переключать галочку здесь. Галочка показывает, попадает ли сервер в итоговый DNS (из state/шаблона); при включении для того же тега тело может браться из dns_options шаблона.",
   "wizard.dns.error_locked_edit": "Этот DNS-сервер нельзя редактировать (config.dns шаблона).",
+  "wizard.dns.no_rules": "Нет DNS-правил.",
+  "wizard.dns.tooltip_toggle_raw_rules": "Переключить между списком правил и редактором JSON (только user-правила).",
   "wizard.rules.button_srs_download": "⬇ srs",
   "wizard.rules.button_srs_loading": "🔄 srs",
   "wizard.rules.button_srs_done": "✔️ srs",

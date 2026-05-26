@@ -159,127 +159,10 @@ func gatherTemplateVars(m *wizardmodels.WizardModel) map[string]string {
 	return out
 }
 
-// renderPresetBundledDNSRulesRows — собирает DNS rule rows через ResolveDNS.
-// SPEC 056-R-N follow-up: единая логика с server rendering.
-func renderPresetBundledDNSRulesRows(m *wizardmodels.WizardModel, parentWindow fyne.Window, onChanged func()) []fyne.CanvasObject {
-	if m == nil || m.TemplateData == nil {
-		return nil
-	}
-	shadowState := buildShadowStateForResolve(m)
-	resolved := build.ResolveDNS(shadowState, m.TemplateData, gatherTemplateVars(m))
-
-	presetByID := make(map[string]*wizardtemplate.Preset, len(m.TemplateData.Presets))
-	for i := range m.TemplateData.Presets {
-		presetByID[m.TemplateData.Presets[i].ID] = &m.TemplateData.Presets[i]
-	}
-
-	var rows []fyne.CanvasObject
-	for _, dr := range resolved.Rules {
-		if dr.Source != build.DNSSourcePreset {
-			continue
-		}
-		tpl := presetByID[dr.PresetID]
-		if tpl == nil {
-			continue
-		}
-		ruleCopy := dr.Body
-		tplCopy := tpl
-		ref := tplCopy.ID
-		drCopy := dr
-		onToggle := func(v bool) {
-			for _, pr := range m.PresetRefs {
-				if pr != nil && pr.Ref == ref {
-					pr.SetDNSRuleEnabled(v)
-					break
-				}
-			}
-			if onChanged != nil {
-				onChanged()
-			}
-		}
-		onView := func() { showBundledDNSRuleDetailsDialog(parentWindow, tplCopy, ruleCopy) }
-		rows = append(rows, buildPresetBundledDNSRuleRowFromResolved(tplCopy, drCopy, onToggle, onView))
-	}
-	return rows
-}
-
-// buildPresetBundledDNSRuleRowFromResolved — SPEC 056-R-N: row из ResolvedDNSRule.
-// Active=false → checkbox disabled + tooltip с InactiveReason.
-func buildPresetBundledDNSRuleRowFromResolved(
-	tpl *wizardtemplate.Preset,
-	dr build.ResolvedDNSRule,
-	onToggle func(bool),
-	onView func(),
-) fyne.CanvasObject {
-	// rule_set summary (local tag'и без preset-prefix).
-	ruleSetSummary := ""
-	switch v := dr.Body["rule_set"].(type) {
-	case string:
-		ruleSetSummary = stripPresetPrefix(v, tpl.ID)
-	case []interface{}:
-		parts := make([]string, 0, len(v))
-		for _, x := range v {
-			if s, ok := x.(string); ok {
-				parts = append(parts, stripPresetPrefix(s, tpl.ID))
-			}
-		}
-		ruleSetSummary = joinSep(parts, ", ")
-	}
-
-	presetLabel := tpl.Label
-	if presetLabel == "" {
-		presetLabel = tpl.ID
-	}
-
-	rowText := "🔒 " + presetLabel
-	if ruleSetSummary != "" {
-		rowText += " (" + ruleSetSummary + ")"
-	}
-	titleLabel := ttwidget.NewLabel(rowText)
-	titleLabel.Wrapping = fyne.TextTruncate
-
-	// Tooltip: server + rule_set + inactive reason если применимо.
-	server, _ := dr.Body["server"].(string)
-	server = stripPresetPrefix(server, tpl.ID)
-	tipParts := []string{}
-	if server != "" {
-		tipParts = append(tipParts, "server="+server)
-	}
-	if ruleSetSummary != "" {
-		tipParts = append(tipParts, "rule_set="+ruleSetSummary)
-	}
-	if !dr.Active && dr.InactiveReason != "" {
-		tipParts = append(tipParts, "inactive ("+dr.InactiveReason+")")
-	}
-	tip := joinSep(tipParts, " · ")
-
-	var row *fynewidget.HoverRow
-	rowGetter := func() *fynewidget.HoverRow { return row }
-
-	cwc := fynewidget.NewCheckWithContent(func(checked bool) {
-		if onToggle != nil {
-			onToggle(checked)
-		}
-	}, titleLabel, fynewidget.CheckWithContentConfig{ContentToolTip: tip})
-	cwc.Check.SetChecked(dr.Enabled)
-	if !dr.Active {
-		cwc.Check.Disable()
-	}
-
-	var right *fyne.Container
-	if onView != nil {
-		viewBtn := fynewidget.NewHoverForwardButtonWithIcon("View JSON", theme.SearchIcon(), onView, rowGetter)
-		viewBtn.Importance = widget.LowImportance
-		right = container.NewHBox(viewBtn)
-	} else {
-		right = container.NewHBox()
-	}
-
-	rowInner := container.NewBorder(nil, nil, cwc.CheckLeading, right, cwc.Content)
-	row = fynewidget.NewHoverRow(rowInner, fynewidget.HoverRowConfig{})
-	row.WireTooltipLabelHover(titleLabel)
-	return row
-}
+// SPEC 062-F-N: renderPresetBundledDNSRulesRows + buildPresetBundledDNSRuleRowFromResolved
+// removed — unified rules path в `dns_unified_rules.go::buildSingleDNSPresetRuleRow`
+// заменяет их. Read-only View JSON dialog по-прежнему вызывается из
+// showBundledDNSRuleDetailsDialog ниже.
 
 // showBundledDNSRuleDetailsDialog — read-only modal с DNS-rule preset'а.
 // Изменения preset-bundled DNS rule НЕВОЗМОЖНЫ — содержимое определяется template'ом
@@ -440,15 +323,8 @@ func buildPresetBundledDNSRowFromResolved(
 	return row
 }
 
-// stripPresetPrefix — убирает `<preset_id>:` префикс из tag'а если он там есть.
-// `"ru-direct:yandex_udp"` → `"yandex_udp"`. Если префикса нет — возвращает as is.
-func stripPresetPrefix(tag, presetID string) string {
-	prefix := presetID + ":"
-	if presetID != "" && len(tag) > len(prefix) && tag[:len(prefix)] == prefix {
-		return tag[len(prefix):]
-	}
-	return tag
-}
+// SPEC 062-F-N: stripPresetPrefix removed with renderPresetBundledDNSRulesRows.
+// Unified row builder (dns_unified_rules.go) uses preset label directly.
 
 // joinSep — простой join без strings package (минимизировать imports в UI файле).
 func joinSep(parts []string, sep string) string {
