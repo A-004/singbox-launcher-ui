@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 
 	"singbox-launcher/core"
+	"singbox-launcher/core/events"
 	"singbox-launcher/internal/locale"
 	"singbox-launcher/ui/components"
 )
@@ -104,19 +105,32 @@ func NewApp(window fyne.Window, controller *core.AppController) *App {
 	}
 
 	// Регистрируем комбинированный callback для обновления состояния вкладки Servers
+	// (legacy путь UpdateCoreStatusFunc — сохраняем пока на нём висят
+	// другие потребители: core_dashboard_tab.updateRunningStatus, etc.)
 	controller.UIService.UpdateCoreStatusFunc = func() {
 		// Вызываем оригинальный callback, если он есть
 		if originalUpdateCoreStatusFunc != nil {
 			originalUpdateCoreStatusFunc()
 		}
-		// Обновляем состояние вкладки Servers + динамическая иконка Core
+		// Обновляем состояние вкладки Servers
 		fyne.Do(func() {
 			app.updateClashAPITabState()
-			refreshCoreTabIcon()
 		})
 	}
 
-	// Инициализируем состояние вкладки + первичный рендер иконки Core
+	// Динамическая иконка Core подписывается на ТИПИЗИРОВАННЫЙ
+	// EventBus (SPEC 047), а не на legacy UpdateCoreStatusFunc — это
+	// канонический канал для cross-tab реакций на смену состояния
+	// sing-box. Тот же канал слушает auto_update / proxy-active-changed
+	// логика. Subscribe идемпотентен (одна handler-регистрация на NewApp).
+	if controller.EventBus != nil {
+		controller.EventBus.Subscribe(events.VpnStateChanged, func(_ events.Event) {
+			fyne.Do(refreshCoreTabIcon)
+		})
+	}
+
+	// Инициализируем состояние вкладки + первичный рендер иконки Core.
+	// EventBus.Subscribe не fires backfill — рендерим вручную для startup'а.
 	app.updateClashAPITabState()
 	refreshCoreTabIcon()
 
