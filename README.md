@@ -363,6 +363,7 @@ To run GUI tests locally, set `TEST_PACKAGE` manually inside the script or invok
 | Clash API tab disabled | sing-box is not running (tab is intentionally disabled until engine is up). |
 | Subscription returns empty / errors | Check **Subscription identification** in Settings — HWID-binding panels need `Send device ID` enabled. Look at the ⚠ badge tooltip for provider announce. |
 | TUN doesn't capture traffic (Linux/macOS) | TUN interface usually needs root: `sudo ./singbox-launcher` or `sudo setcap cap_net_admin+ep ./singbox-launcher` (Linux). |
+| Win7 32-bit: tray icon shows but window is blank / empty frame | OpenGL 2.0 vs Fyne's 2.1+ requirement — see [docs/WIN7_OPENGL.md](docs/WIN7_OPENGL.md) for the Mesa3D drop-in fix. |
 | Subscription auto-update silent | Open **Settings → Subscriptions** — confirm `Auto-update subscriptions` is on. Heartbeat is hourly; immediate retry fires on VPN-event. |
 | Need full state for a bug report | **Diagnostics → Copy snapshot** packages template + state + cache + config into one JSON. |
 

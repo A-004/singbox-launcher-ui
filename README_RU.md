@@ -369,6 +369,7 @@ build\test_windows.bat   # Windows
 | Вкладка Clash API недоступна | sing-box не запущен (вкладка намеренно disabled, пока движок не поднят). |
 | Подписка возвращает пусто / ошибки | Проверьте **Subscription identification** в Settings — HWID-binding панели требуют `Send device ID` включённым. Смотрите tooltip ⚠ badge — там announce от провайдера. |
 | TUN не захватывает трафик (Linux/macOS) | Для TUN-интерфейса обычно нужен root: `sudo ./singbox-launcher` или `sudo setcap cap_net_admin+ep ./singbox-launcher` (Linux). |
+| Win7 32-bit: иконка в трее есть, окно пустое / без виджетов | OpenGL 2.0 против требования Fyne 2.1+ — см. [docs/WIN7_OPENGL.md](docs/WIN7_OPENGL.md), drop-in фикс через Mesa3D. |
 | Auto-update подписок молчит | Откройте **Settings → Subscriptions** — убедитесь, что `Auto-update subscriptions` включён. Heartbeat раз в час; immediate retry срабатывает на VPN-event. |
 | Нужен полный state для bug-report | **Diagnostics → Copy snapshot** упакует template + state + cache + config одним JSON. |
 
