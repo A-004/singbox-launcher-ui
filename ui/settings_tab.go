@@ -245,10 +245,11 @@ func buildSubscriptionIdentificationBlock(ac *core.AppController, binDir string)
 	}
 
 	hwidLabel := widget.NewLabel(locale.T("settings.hwid_label"))
-	// UUIDv4 is 36 chars; pin entry width to ~360px so the row doesn't
-	// stretch the whole Settings tab (and thus the entire app window).
-	// GridWrap forces a fixed cell size — entry won't grow horizontally.
-	hwidEntryFixed := container.New(layout.NewGridWrapLayout(fyne.NewSize(360, hwidEntry.MinSize().Height)), hwidEntry)
+	// 120px ≈ 12 visible UUID chars; full 36-char UUID still fits via
+	// horizontal scroll inside the entry. Compact-by-default — users
+	// either copy-paste the whole string or use Regenerate, both work
+	// without seeing the full ID at once.
+	hwidEntryFixed := container.New(layout.NewGridWrapLayout(fyne.NewSize(120, hwidEntry.MinSize().Height)), hwidEntry)
 	hwidRow := container.NewHBox(hwidLabel, hwidEntryFixed, regenBtn, layout.NewSpacer())
 
 	return container.NewVBox(
