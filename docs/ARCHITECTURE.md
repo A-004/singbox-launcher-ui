@@ -608,7 +608,7 @@ singbox-launcher/
 - `UpdateUI()` - обновление всех UI элементов
 - `StopTrayMenuUpdateTimer()` - остановка таймера обновления меню
 - `QuitApplication()` - выход из приложения
-- `FocusOpenChildWindows` - callback для переноса фокуса на одно из дочерних окон визарда (View, Outbound Edit, rule dialog) при клике по окну визарда; устанавливается в `wizard.go`, вызывается из `ui/components/click_redirect.go`
+- `FocusOpenChildWindows` - callback для переноса фокуса на одно из дочерних окон визарда (View, Outbound Edit, rule dialog) при клике по окну визарда; устанавливается в `wizard.go`, вызывается из `ui/components/click_redirect.go`. **Главное окно лаунчера** свой overlay не использует с v0.9.8 — флипается константой `ui.wizardOverlayEnabled` в `ui/wizard_overlay.go` (default `false` → клики по главному окну работают параллельно с открытым визардом; `true` восстанавливает legacy «wizard owns foreground» поведение). Внутренний wizard'овый `ChildWindowsOverlay` независим от этой константы. Подробности — `docs/WIZARD_CHILD_WINDOWS.md` § «Main-window overlay (separate, opt-in)».
 - Структуры: `UIService` с полями для Fyne компонентов и callbacks
 - Тултипы: см. раздел «Используемые библиотеки» (fyne-tooltip).
 
