@@ -71,20 +71,54 @@ func NewApp(window fyne.Window, controller *core.AppController) *App {
 	// Сохраняем оригинальный callback, который был установлен в CreateCoreDashboardTab
 	originalUpdateCoreStatusFunc := controller.UIService.UpdateCoreStatusFunc
 
+	// refreshCoreTabIcon — динамический emoji в табе Core по состоянию
+	// sing-box. Перерисовывает label + дёргает AppTabs.Refresh чтобы
+	// табстрип реально перечитал текст. Безопасно вызывать с UI-thread
+	// (caller wrap'ит в fyne.Do).
+	//
+	//   ▶️ Core   — stopped / idle (приглашение «нажми Start»)
+	//   🟢 Core   — running (зелёный кружок = «активно»)
+	//   🔄 Core   — restarting (тот же индикатор что у status row)
+	//
+	// База берётся из локали (`Core` / `Ядро` / etc), эмодзи приклеивается
+	// тут чтобы не плодить per-state ключи в каждой локали.
+	coreLabelBase := locale.T("app.tab.core")
+	// Strip leading emoji + space from the locale base — text after the
+	// first space character. Locale strings ship with a default ▶️ (or
+	// previous attempt's icon) for the never-changed startup case; we
+	// override per-state below so the leading emoji from locale gets
+	// stripped to avoid double-icon.
+	if i := indexEmojiSep(coreLabelBase); i > 0 {
+		coreLabelBase = coreLabelBase[i:]
+	}
+	refreshCoreTabIcon := func() {
+		var icon string
+		switch {
+		case controller.RunningState != nil && controller.RunningState.IsRunning():
+			icon = "🟢"
+		default:
+			icon = "▶️"
+		}
+		coreTabItem.Text = icon + " " + coreLabelBase
+		app.tabs.Refresh()
+	}
+
 	// Регистрируем комбинированный callback для обновления состояния вкладки Servers
 	controller.UIService.UpdateCoreStatusFunc = func() {
 		// Вызываем оригинальный callback, если он есть
 		if originalUpdateCoreStatusFunc != nil {
 			originalUpdateCoreStatusFunc()
 		}
-		// Обновляем состояние вкладки Servers
+		// Обновляем состояние вкладки Servers + динамическая иконка Core
 		fyne.Do(func() {
 			app.updateClashAPITabState()
+			refreshCoreTabIcon()
 		})
 	}
 
-	// Инициализируем состояние вкладки
+	// Инициализируем состояние вкладки + первичный рендер иконки Core
 	app.updateClashAPITabState()
+	refreshCoreTabIcon()
 
 	// Инициализируем overlay для перенаправления кликов на визард.
 	// Поведение зависит от `wizardOverlayEnabled` (см. ui/wizard_overlay.go) —
@@ -175,4 +209,18 @@ func (a *App) updateClashAPITabState() {
 			a.tabs.Select(coreTab)
 		}
 	}
+}
+
+// indexEmojiSep — returns the byte index just AFTER the first ASCII
+// space following an emoji prefix in s ("🚀 Core" → 5, "Core" → 0).
+// Used to strip a baked-in emoji from the locale's app.tab.core string
+// so we can substitute a state-driven one at runtime without each
+// locale carrying separate `app.tab.core.running` keys.
+func indexEmojiSep(s string) int {
+	for i, r := range s {
+		if r == ' ' {
+			return i + 1 // byte index after the space
+		}
+	}
+	return 0
 }
