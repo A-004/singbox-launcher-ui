@@ -22,9 +22,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 
 	"singbox-launcher/core/build"
 	wizardtemplate "singbox-launcher/core/template"
@@ -34,56 +32,10 @@ import (
 	wizardpresentation "singbox-launcher/ui/configurator/presentation"
 )
 
-// userDNSRulesParsed — парсит model.DNSRulesText в массив rule-объектов.
-// Поддерживает оба формата: `{"rules": [...]}` или массив `[...]`.
-func userDNSRulesParsed(text string) []map[string]interface{} {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil
-	}
-	// Try {"rules": [...]}
-	var wrapper struct {
-		Rules []map[string]interface{} `json:"rules"`
-	}
-	if err := json.Unmarshal([]byte(text), &wrapper); err == nil && wrapper.Rules != nil {
-		return wrapper.Rules
-	}
-	// Try array directly
-	var arr []map[string]interface{}
-	if err := json.Unmarshal([]byte(text), &arr); err == nil {
-		return arr
-	}
-	return nil
-}
-
-// userDNSRulesSerialize — сериализует rules обратно в DNSRulesText string.
-// Формат `{"rules": [...]}` — consistent с sing-box dns section.
-func userDNSRulesSerialize(rules []map[string]interface{}) string {
-	if len(rules) == 0 {
-		return ""
-	}
-	out, err := json.MarshalIndent(map[string]interface{}{"rules": rules}, "", "  ")
-	if err != nil {
-		return ""
-	}
-	return string(out)
-}
-
-// setUserDNSRulesText — пишет text и в model.DNSRulesText, и в legacy
-// hidden DNSRulesEntry виджет. Без второго на Save SyncGUIToModel перетёр
-// бы model.DNSRulesText стейлом старого виджета (entry не видим, но
-// `gs.DNSRulesEntry.Text` остаётся со значением load-time).
-func setUserDNSRulesText(presenter *wizardpresentation.WizardPresenter, text string) {
-	if presenter == nil {
-		return
-	}
-	if m := presenter.Model(); m != nil {
-		m.DNSRulesText = text
-	}
-	if gs := presenter.GUIState(); gs != nil && gs.DNSRulesEntry != nil {
-		gs.DNSRulesEntry.SetText(text)
-	}
-}
+// SPEC 062-F-N: legacy text-based user DNS rule helpers (userDNSRulesParsed,
+// userDNSRulesSerialize, setUserDNSRulesText) удалены — UI теперь работает
+// с typed model.DNSUserRules. Sync hidden DNSRulesEntry widget живёт в
+// dns_unified_rules.go::syncDNSRulesTextToHiddenEntry.
 
 // dnsRuleSummary — human-readable краткое описание rule для tile.
 // Берёт match-поля + server. Tooltip полный JSON.
@@ -119,8 +71,12 @@ func dnsRuleSummary(rule map[string]interface{}) (title, tooltip string) {
 	addList("ip_cidr", "cidr=")
 	addList("rule_set", "rule_set=")
 
+	// Note: NO `→ ` prefix here — the unified rules list (dns_unified_rules.go)
+	// adds its own `→ ` per row to mark user-rule vs `🔗` for preset-rule.
+	// Embedding the arrow in the summary led to a double-arrow «→ → server»
+	// when both wrappers ran. Keep this string clean; UI decorates.
 	if server, ok := rule["server"].(string); ok && server != "" {
-		title = "→ " + server + "  ·  " + strings.Join(parts, " · ")
+		title = server + "  ·  " + strings.Join(parts, " · ")
 	} else {
 		title = strings.Join(parts, " · ")
 	}
@@ -133,67 +89,16 @@ func dnsRuleSummary(rule map[string]interface{}) (title, tooltip string) {
 	return title, tooltip
 }
 
-// renderUserDNSRulesRows — генерит row widget'ы для user DNS rules.
-func renderUserDNSRulesRows(
-	presenter *wizardpresentation.WizardPresenter,
-	parentWindow fyne.Window,
-	onChanged func(),
-) []fyne.CanvasObject {
-	m := presenter.Model()
-	if m == nil {
-		return nil
-	}
-	rules := userDNSRulesParsed(m.DNSRulesText)
-	rows := make([]fyne.CanvasObject, 0, len(rules))
-	for i := range rules {
-		idx := i
-		rule := rules[idx]
-		title, tooltip := dnsRuleSummary(rule)
-
-		label := ttwidget.NewLabel(title)
-		label.Wrapping = fyne.TextTruncate
-		if tooltip != "" {
-			label.SetToolTip(tooltip)
-		}
-
-		editBtn := widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), func() {
-			showEditUserDNSRuleDialog(presenter, parentWindow, idx, onChanged)
-		})
-		editBtn.Importance = widget.LowImportance
-
-		delBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
-			dialog.ShowConfirm(
-				"Confirmation",
-				"Delete this DNS rule?",
-				func(ok bool) {
-					if !ok {
-						return
-					}
-					list := userDNSRulesParsed(presenter.Model().DNSRulesText)
-					if idx < 0 || idx >= len(list) {
-						return
-					}
-					list = append(list[:idx], list[idx+1:]...)
-					setUserDNSRulesText(presenter, userDNSRulesSerialize(list))
-					presenter.MarkAsChanged()
-					if onChanged != nil {
-						onChanged()
-					}
-				},
-				parentWindow,
-			)
-		})
-		delBtn.Importance = widget.LowImportance
-
-		right := container.NewHBox(editBtn, delBtn)
-		rows = append(rows, container.NewBorder(nil, nil, nil, right, label))
-	}
-	return rows
-}
+// SPEC 062-F-N: renderUserDNSRulesRows removed — replaced by
+// dns_unified_rules.go::buildSingleDNSUserRuleRow в едином ordered списке.
+// dnsRuleSummary остаётся (используется обоими user/preset row builders).
 
 // showEditUserDNSRuleDialog — editor user DNS rule в отдельном fyne window.
 // Radio (2 options): SRS (existing rule_set) | Inline (match fields).
 // Form/JSON tabs. idx == -1 — create new; idx >= 0 — edit existing.
+//
+// SPEC 062-F-N: работает напрямую с typed model.DNSUserRules. Add path
+// также добавляет slot в DNSRuleOrder через addDNSUserRule.
 func showEditUserDNSRuleDialog(
 	presenter *wizardpresentation.WizardPresenter,
 	parent fyne.Window,
@@ -204,12 +109,13 @@ func showEditUserDNSRuleDialog(
 		return
 	}
 	model := presenter.Model()
-	rules := userDNSRulesParsed(model.DNSRulesText)
 
-	// Working copy.
+	// Working copy from typed DNSUserRules (Phase 3) — fallback to legacy
+	// DNSRulesText parse only when typed list is empty (defensive for
+	// transitional state).
 	var working map[string]interface{}
-	if idx >= 0 && idx < len(rules) {
-		working = cloneRuleMap(rules[idx])
+	if idx >= 0 && idx < len(model.DNSUserRules) {
+		working = cloneRuleMap(model.DNSUserRules[idx].Body)
 	} else {
 		working = map[string]interface{}{}
 	}
@@ -364,13 +270,25 @@ func showEditUserDNSRuleDialog(
 			dialog.ShowError(fmt.Errorf("rule is empty"), editWin)
 			return
 		}
-		current := userDNSRulesParsed(presenter.Model().DNSRulesText)
-		if idx >= 0 && idx < len(current) {
-			current[idx] = finalRule
-		} else {
-			current = append(current, finalRule)
+		// Strip top-level kind/ref/enabled if user pasted state-shape JSON in raw mode.
+		clean := make(map[string]interface{}, len(finalRule))
+		for k, v := range finalRule {
+			switch k {
+			case "kind", "ref", "enabled":
+				continue
+			}
+			clean[k] = v
 		}
-		setUserDNSRulesText(presenter, userDNSRulesSerialize(current))
+		m := presenter.Model()
+		if idx >= 0 && idx < len(m.DNSUserRules) {
+			m.DNSUserRules[idx].Body = clean
+		} else {
+			addDNSUserRule(m, clean)
+		}
+		// Keep DNSRulesText synced (raw-JSON toggle reads it).
+		m.DNSRulesText = wizardmodels.DNSUserRulesToText(m.DNSUserRules)
+		syncDNSRulesTextToHiddenEntry(presenter)
+		m.TemplatePreviewNeedsUpdate = true
 		presenter.MarkAsChanged()
 		editWin.Close()
 		if onChanged != nil {
@@ -548,7 +466,8 @@ func showViewAllDNSRulesDialog(presenter *wizardpresentation.WizardPresenter, pa
 		return
 	}
 
-	// 1. Bundled DNS rules from active presets
+	// SPEC 062-F-N: обходим DNSRuleOrder — preview совпадает с тем, что
+	// эмитится в state.DNS.Rules (а оттуда — в config.json).
 	var allRules []map[string]interface{}
 	presetByID := make(map[string]*wizardtemplate.Preset)
 	if m.TemplateData != nil {
@@ -556,27 +475,37 @@ func showViewAllDNSRulesDialog(presenter *wizardpresentation.WizardPresenter, pa
 			presetByID[m.TemplateData.Presets[i].ID] = &m.TemplateData.Presets[i]
 		}
 	}
-	for _, pr := range m.PresetRefs {
-		if pr == nil || !pr.Enabled {
-			continue
+	for _, slot := range m.DNSRuleOrder {
+		switch slot.Kind {
+		case wizardmodels.DNSSlotKindPresetRef:
+			if slot.Index < 0 || slot.Index >= len(m.PresetRefs) {
+				continue
+			}
+			pr := m.PresetRefs[slot.Index]
+			if pr == nil || !pr.Enabled || !pr.IsDNSRuleEnabled() {
+				continue
+			}
+			tpl := presetByID[pr.Ref]
+			if tpl == nil {
+				continue
+			}
+			frags, _, ok := build.ExpandPreset(tpl, pr.Vars)
+			if !ok || frags.DNSRule == nil {
+				continue
+			}
+			allRules = append(allRules, frags.DNSRule)
+		case wizardmodels.DNSSlotKindUser:
+			if slot.Index < 0 || slot.Index >= len(m.DNSUserRules) {
+				continue
+			}
+			ur := m.DNSUserRules[slot.Index]
+			if !ur.Enabled || len(ur.Body) == 0 {
+				continue
+			}
+			allRules = append(allRules, ur.Body)
 		}
-		tpl := presetByID[pr.Ref]
-		if tpl == nil {
-			continue
-		}
-		frags, _, ok := build.ExpandPreset(tpl, pr.Vars)
-		if !ok || frags.DNSRule == nil {
-			continue
-		}
-		allRules = append(allRules, frags.DNSRule)
 	}
-
-	// 2. User DNS rules
-	allRules = append(allRules, userDNSRulesParsed(m.DNSRulesText)...)
-
-	// 3. Sort by source for display clarity — но порядок важен для sing-box.
-	// Сохраняем порядок: presets bundled первыми, user после.
-	_ = sort.SliceStable
+	_ = sort.SliceStable // kept for legacy stub; not used.
 
 	// 4. Pretty JSON
 	wrapper := map[string]interface{}{"rules": allRules}
@@ -587,7 +516,7 @@ func showViewAllDNSRulesDialog(presenter *wizardpresentation.WizardPresenter, pa
 		fyne.TextAlignLeading, fyne.TextStyle{Bold: true},
 	)
 	help := widget.NewLabelWithStyle(
-		"Read-only preview of final config.json::dns.rules — bundled preset rules first, your custom rules after.",
+		"Read-only preview of final config.json::dns.rules in user order (preset and user rules interleaved per DNSRuleOrder).",
 		fyne.TextAlignLeading, fyne.TextStyle{Italic: true},
 	)
 	help.Wrapping = fyne.TextWrapWord

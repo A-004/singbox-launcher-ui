@@ -381,7 +381,18 @@ func TestConvertRuleSetToLocalRequired_LocalFilePresent(t *testing.T) {
 	execDir := t.TempDir()
 	path := stubSRSFile(t, execDir, "x")
 
-	in := json.RawMessage(`{"tag":"x","type":"local","format":"binary","path":"` + path + `"}`)
+	// json.Marshal handles backslash escaping (Windows: `C:\Users\...`).
+	// Previous string-concat broke on Windows because `\U`, `\b`, etc.
+	// are invalid JSON escape sequences.
+	in, err := json.Marshal(map[string]interface{}{
+		"tag":    "x",
+		"type":   "local",
+		"format": "binary",
+		"path":   path,
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
 	got, err := convertRuleSetToLocalRequired(in, execDir)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -402,8 +413,17 @@ func TestConvertRuleSetToLocalRequired_LocalFileMissing(t *testing.T) {
 	execDir := t.TempDir()
 	missingPath := filepath.Join(execDir, "bin", "rule-sets", "missing.srs")
 
-	in := json.RawMessage(`{"tag":"missing","type":"local","format":"binary","path":"` + missingPath + `"}`)
-	_, err := convertRuleSetToLocalRequired(in, execDir)
+	// See note in _LocalFilePresent test re: Windows backslash escaping.
+	in, err := json.Marshal(map[string]interface{}{
+		"tag":    "missing",
+		"type":   "local",
+		"format": "binary",
+		"path":   missingPath,
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	_, err = convertRuleSetToLocalRequired(in, execDir)
 	if err == nil {
 		t.Fatal("expected error on missing local file")
 	}

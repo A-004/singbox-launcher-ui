@@ -297,35 +297,49 @@ func CreateDNSTab(presenter *wizardpresentation.WizardPresenter) fyne.CanvasObje
 
 	refreshList()
 
-	// Bundled DNS rules от active preset-ref'ов — read-only список.
-	bundledRulesBox := container.NewVBox()
-	// User DNS rules — список с Edit/Delete; replaced legacy MultiLineEntry editor.
-	userRulesBox := container.NewVBox()
+	// SPEC 062-F-N: единый ordered список DNS rules (preset + user
+	// interleaved, drag ↑↓). Вместо двух разделённых секций bundled +
+	// user — один VBox dispatch'ит по DNSRuleOrder.
+	unifiedRulesBox := container.NewVBox()
+	// rawRulesEntry — viewer для raw-JSON toggle (Phase 3 deferred mode).
+	rawRulesEntry := widget.NewMultiLineEntry()
+	rawRulesEntry.Wrapping = fyne.TextWrapOff
+	rawRulesScroll := container.NewScroll(rawRulesEntry)
+	rawRulesScroll.Direction = container.ScrollBoth
+	rawRulesHeight := canvas.NewRectangle(color.Transparent)
+	rawRulesHeight.SetMinSize(fyne.NewSize(0, 200))
+	rawRulesBlock := container.NewMax(rawRulesHeight, rawRulesScroll)
+	rawRulesBlock.Hide() // list view by default
+
+	// rawJSONMode — toggle между list view и raw-JSON edit. Reflected
+	// in the toggle button icon (DocumentCreateIcon → ViewRestoreIcon).
+	rawJSONMode := false
 
 	var refreshAll func()
-	rebuildBundledRules := func() {
-		rows := renderPresetBundledDNSRulesRows(presenter.Model(), dialogParent(), func() {
-			presenter.MarkAsChanged()
-		})
-		objs := make([]fyne.CanvasObject, 0, len(rows))
-		objs = append(objs, rows...)
-		bundledRulesBox.Objects = objs
-		bundledRulesBox.Refresh()
-	}
-	rebuildUserRules := func() {
-		rows := renderUserDNSRulesRows(presenter, dialogParent(), func() {
-			if refreshAll != nil {
-				refreshAll()
-			}
-		})
-		objs := make([]fyne.CanvasObject, 0, len(rows))
-		objs = append(objs, rows...)
-		userRulesBox.Objects = objs
-		userRulesBox.Refresh()
+	rebuildUnified := func() {
+		unifiedRulesBox.Objects = unifiedRulesBox.Objects[:0]
+		m := presenter.Model()
+		// Reconcile defensively — if user added/removed presets in another
+		// tab, DNSRuleOrder might have stale or missing slots.
+		wizardmodels.ReconcileDNSRuleOrder(m)
+		if len(m.DNSRuleOrder) == 0 {
+			unifiedRulesBox.Add(widget.NewLabel(locale.T("wizard.dns.no_rules")))
+		} else {
+			buildUnifiedDNSRuleRows(presenter, m, dialogParent(), unifiedRulesBox, func() {
+				if refreshAll != nil {
+					refreshAll()
+				}
+			})
+		}
+		unifiedRulesBox.Refresh()
 	}
 	refreshAll = func() {
-		rebuildBundledRules()
-		rebuildUserRules()
+		if rawJSONMode {
+			// Sync entry text from model when re-entering view.
+			rawRulesEntry.SetText(wizardmodels.DNSUserRulesToText(presenter.Model().DNSUserRules))
+		} else {
+			rebuildUnified()
+		}
 	}
 
 	previousRefresh := guiState.RefreshDNSList
@@ -334,6 +348,58 @@ func CreateDNSTab(presenter *wizardpresentation.WizardPresenter) fyne.CanvasObje
 		refreshAll()
 	}
 	refreshAll()
+
+	// Raw-JSON toggle — choice (b) from the spec: small icon button at the
+	// top-right of the rules section. Click → swap unified list for the raw
+	// multi-line editor with the current DNSUserRules serialized; click
+	// again → parse text, replace DNSUserRules, rebuild DNSRuleOrder.
+	var toggleBtn *widget.Button
+	toggleBtn = widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), nil)
+	toggleBtn.Importance = widget.LowImportance
+	setTooltip(toggleBtn, locale.T("wizard.dns.tooltip_toggle_raw_rules"))
+	toggleBtn.OnTapped = func() {
+		m := presenter.Model()
+		if !rawJSONMode {
+			// Switch to raw view: serialize current DNSUserRules.
+			rawRulesEntry.SetText(wizardmodels.DNSUserRulesToText(m.DNSUserRules))
+			unifiedRulesBox.Hide()
+			rawRulesBlock.Show()
+			rawJSONMode = true
+			toggleBtn.SetIcon(theme.ViewRestoreIcon())
+		} else {
+			// Switch to list view: parse text, replace DNSUserRules, rebuild order.
+			newRules := wizardmodels.DNSUserRulesFromText(rawRulesEntry.Text)
+			m.DNSUserRules = newRules
+			m.DNSRulesText = wizardmodels.DNSUserRulesToText(newRules)
+			if gs := presenter.GUIState(); gs != nil && gs.DNSRulesEntry != nil {
+				gs.DNSRulesEntry.SetText(m.DNSRulesText)
+			}
+			// Drop existing user slots and re-append in text order; preset
+			// slots stay in their current positions. ReconcileDNSRuleOrder
+			// won't add user slots because indices already exist — so do it
+			// manually: filter out user-slots, then append fresh ones.
+			kept := make([]wizardmodels.DNSRuleSlot, 0, len(m.DNSRuleOrder))
+			for _, s := range m.DNSRuleOrder {
+				if s.Kind != wizardmodels.DNSSlotKindUser {
+					kept = append(kept, s)
+				}
+			}
+			for i := range m.DNSUserRules {
+				kept = append(kept, wizardmodels.DNSRuleSlot{
+					Kind:  wizardmodels.DNSSlotKindUser,
+					Index: i,
+				})
+			}
+			m.DNSRuleOrder = kept
+			m.TemplatePreviewNeedsUpdate = true
+			presenter.MarkAsChanged()
+			rawRulesBlock.Hide()
+			unifiedRulesBox.Show()
+			rawJSONMode = false
+			toggleBtn.SetIcon(theme.DocumentCreateIcon())
+			rebuildUnified()
+		}
+	}
 
 	// [+ Add Rule] и [View All DNS Rules] кнопки внизу секции Rules.
 	addRuleBtn := widget.NewButton("+ Add Rule", func() {
@@ -346,9 +412,12 @@ func CreateDNSTab(presenter *wizardpresentation.WizardPresenter) fyne.CanvasObje
 	viewAllBtn.Importance = widget.LowImportance
 	rulesButtons := container.NewHBox(addRuleBtn, layout.NewSpacer(), viewAllBtn)
 
-	// Hide legacy MultiLineEntry rulesBlock — оставлен в коде для presenter sync,
-	// но не отображается в UI (юзер использует row-list + Add Rule dialog).
+	// Hide legacy MultiLineEntry rulesBlock — kept in code only for presenter
+	// sync compat (SyncGUIToModel reads it on every Save). The toggle above
+	// replaces it as the user-facing raw editor.
 	_ = rulesBlock
+
+	rulesHeader := container.NewHBox(rulesLabel, layout.NewSpacer(), toggleBtn)
 
 	return container.NewVBox(
 		serversHeader,
@@ -356,9 +425,9 @@ func CreateDNSTab(presenter *wizardpresentation.WizardPresenter) fyne.CanvasObje
 		widget.NewSeparator(),
 		strategyAndCacheRow,
 		widget.NewSeparator(),
-		rulesLabel,
-		bundledRulesBox,
-		userRulesBox,
+		rulesHeader,
+		unifiedRulesBox,
+		rawRulesBlock,
 		rulesButtons,
 		widget.NewSeparator(),
 		finalAndResolverRow,

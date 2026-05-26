@@ -3,1058 +3,406 @@
 [![GitHub](https://img.shields.io/badge/GitHub-Leadaxe%2Fsingbox--launcher-blue)](https://github.com/Leadaxe/singbox-launcher)
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.24%2B-blue)](https://golang.org/)
-[![Version](https://img.shields.io/badge/version-0.8.6-blue)](https://github.com/Leadaxe/singbox-launcher/releases)
+[![Version](https://img.shields.io/badge/version-0.9.7-blue)](https://github.com/Leadaxe/singbox-launcher/releases)
 
-Кроссплатформенный графический лаунчер для [sing-box](https://github.com/SagerNet/sing-box) - универсального прокси-клиента.
+**Десктоп-платформа сетевой маршрутизации и анализа трафика. 15+ VPN-протоколов, глубина настроек и API уровня Enterprise. Поверх [sing-box](https://github.com/SagerNet/sing-box) как execution-engine.**
 
 **Репозиторий**: [https://github.com/Leadaxe/singbox-launcher](https://github.com/Leadaxe/singbox-launcher)
 
 **🌐 Языки**: [English](README.md) | [Русский](README_RU.md)
 
-> **⚠️ ВАЖНОЕ ПРЕДУПРЕЖДЕНИЕ**
-> 
-> Данный инструмент является **профессиональным программным обеспечением**, предназначенным исключительно для **сетевых администраторов и IT-специалистов** с целью упрощения администрирования и управления сетевыми подключениями в корпоративных и профессиональных средах.
-> 
-> **Использование данного инструмента любым нелегальным образом запрещено.** Разработчики не несут ответственности за неправомерное использование данного программного обеспечения и призывают ни в каком случае не нарушать действующее законодательство.
+> **⚠️ Важное предупреждение**
+>
+> Данный инструмент является профессиональным программным обеспечением, предназначенным для сетевых администраторов и IT-специалистов с целью администрирования и управления сетевыми подключениями в корпоративных и профессиональных средах.
+>
+> Использование данного инструмента любым нелегальным образом запрещено. Разработчики не несут ответственности за неправомерное использование и призывают соблюдать действующее законодательство.
 
-## 📑 Содержание
+---
 
-- [📸 Скриншоты](#-скриншоты)
-- [🚀 Возможности](#-возможности)
-- [💡 Зачем нужен этот лаунчер?](#-зачем-нужен-этот-лаунчер)
-- [📋 Требования](#-требования)
-- [📦 Установка](#-установка)
-- [📖 Использование](#-использование)
-  - [Первый запуск](#первый-запуск)
-  - [Основные функции](#основные-функции)
-  - [Config Wizard (v0.2.0)](#config-wizard-v020)
-  - [System Tray](#system-tray)
-  - [Параметры командной строки](#параметры-командной-строки)
-- [⚙️ Конфигурация](#️-конфигурация)
-  - [Шаблон визарда (wizard_template.json)](#шаблон-визарда-wizard_templatejson)
-  - [Включение Clash API](#включение-clash-api)
-  - [Настройка парсера подписок](#настройка-парсера-подписок)
-- [🔄 Парсер подписок](#-парсер-подписок)
-- [🏗️ Архитектура проекта](#️-архитектура-проекта)
-- [🐛 Решение проблем](#-решение-проблем)
-- [🔁 Автоперезапуск и стабильность](#-автоперезапуск-и-стабильность)
-- [🔨 Сборка из исходников](#-сборка-из-исходников)
-- [🤝 Вклад в проект](#-вклад-в-проект)
-- [📄 Лицензия](#-лицензия)
-- [🙏 Благодарности](#-благодарности)
-- [📞 Поддержка](#-поддержка)
-- [🔮 Планы на будущее](#-планы-на-будущее)
+![Главное окно и Configurator](docs/screenshots/01-hero-core-and-wizard.png)
 
-## 📸 Скриншоты
+## Что это
 
-### Core Dashboard
-![Core Dashboard](https://github.com/user-attachments/assets/660d5f8d-6b2e-4dfa-ba6a-0c6906b383ee)
+Кросс-платформенный десктоп-клиент (Windows, macOS, Linux), который оборачивает sing-box и добавляет вокруг него всю поверхность управления: визуальный конфигуратор, работу с несколькими подписками, переключение серверов с пингом, сетевую observability, декларативную маршрутизацию через preset bundles, локальный HTTP API и self-healing supervision.
 
-### Clash API
-![Clash API Dashboard](https://github.com/user-attachments/assets/389e3c08-f92e-4ef1-bea1-39074b9b6eca)
+Три слоя, которые вместе определяют продукт:
 
-![Clash API in Tray](https://github.com/user-attachments/assets/9801820b-501c-4221-ba56-96f3442445b0)
+- **Пользовательский слой** — старт/стоп одной кнопкой, поток «subscription URL → работающий VPN», переключение серверов с пингом, правила маршрутизации через чекбоксы, окно Traffic Profiler с per-process атрибуцией.
+- **Power-слой** — Configurator с полной семантикой правил sing-box (CIDR, regex доменов, process matching, sniff, GeoIP/Geosite через SRS), preset bundles с условиями `if` / `if_or`, выбор DNS-серверов с условными правилами.
+- **Headless-слой** — bearer-auth Debug API на `127.0.0.1`, 28 endpoints: чтение и запись state, action-триггеры, управление capture трафика, snapshot endpoint для support workflows.
 
-### Config Wizard
-![Config Wizard](https://github.com/user-attachments/assets/07d290c1-cdab-4fd4-bd12-a39c77b3bd68)
+## Возможности
 
-## 🚀 Возможности
+### Подключение
 
-- ✅ **Кроссплатформенность**: Windows (полностью протестировано), macOS (полностью протестировано), Linux (нужно тестирование - помощь приветствуется!)
-- 🎯 **Простое управление**: Запуск/остановка VPN одной кнопкой
-- 🧙 **Config Wizard**: Визуальная пошаговая настройка без редактирования JSON
-- 📊 **Clash API интеграция**: Управление прокси через Clash-совместимый API
-- 🤖 **Автозагрузчики**: Автоматическая загрузка прокси из Clash API при старте
-- 🔄 **Автоматическое обновление конфигурации**: Парсинг подписок и обновление прокси-списка
-- 🔁 **Автоперезапуск**: Умное восстановление после сбоев с мониторингом стабильности
-- 📈 **Диагностика**: Проверка IP, STUN, файлов
-- 🔔 **System Tray**: Работа из системного трея с выбором прокси
-- 📝 **Логирование**: Подробные логи всех операций
+- **15 протоколов соединений** — vless, vmess, trojan, shadowsocks, hysteria, hysteria2, tuic, ssh, wireguard, naive (https / quic).
+- **Несколько источников в одном профиле** — subscription URL и direct links (`vless://`, `vmess://`, …) можно смешивать в одной конфигурации.
+- **Совместимость с VPN-провайдерами** — first-class поддержка HWID-binding панелей (Marzban, Marzneshin, Remnawave, NashVPN, V2Board / Xboard) через канонический XTLS subscription-header протокол (`X-Hwid`, `X-Hwid-Limit`, `Announce`, `Subscription-Userinfo`).
+- **Per-source raw cache** — последнее работающее тело подписки сохраняется при failure (никакого сломанного конфига при недоступности провайдера).
+- **TUN inbound** — системный VPN-драйвер на Windows / macOS / Linux с `auto-route`, `auto-redirect` и `find_process` по умолчанию.
 
-## 💡 Зачем нужен этот лаунчер?
+### Маршрутизация и правила
 
-### ❌ Проблема
+- **Preset bundles** — community-maintained rule-pack'и с типизированными переменными, локальными SRS rule-sets, условными фрагментами (`if` / `if_or`). Включаются чекбоксами.
+- **User rules** — 5 типизированных kind'ов: IP / CIDR, домен (suffix / keyword / regex), процесс (имя или regex пути), SRS URL, raw JSON.
+- **17+ matchers** — domain, IP CIDR, ports, network, protocol, process, package name, GeoSite / GeoIP через SRS, composite rules с `invert`.
+- **Per-rule outbound chains** через селекторы (urltest / failover).
+- **SRS auto-download** — `⚠` badge на missing-file при открытии Configurator; движок не пытается скачивать SRS через ещё не поднятый VPN.
 
-Большинство пользователей Windows запускают sing-box так:
+### DNS
 
-- 📁 `sing-box.exe` + `config.json` в одной папке  
-- ⚫ Черное окно CMD всегда открыто  
-- ✏️ Чтобы переключить узел: редактируешь JSON в Блокноте → убиваешь процесс → запускаешь снова  
-- 📝 Логи исчезают в никуда  
-- 🔄 Ручной перезапуск каждый раз при изменении конфига
+- **Несколько DNS-серверов** с независимым включением/отключением (UDP / DoH / local).
+- **Per-domain DNS-правила** — направление конкретных имён на конкретные серверы.
+- **Resolve strategy**: `prefer_ipv4` / `prefer_ipv6` / `ipv4_only` / `ipv6_only`.
 
-### ✅ Решение
+### Сетевая observability
 
-Этот лаунчер решает все эти проблемы. Всё управляется из одного чистого GUI:
+- **Traffic Profiler** — always-on capture с rolling buffer 60 с × 3000 events, per-process атрибуция, реконструкция CNAME-цепочек, inferred matching по DNS-IP.
+- **Issue classification** — `⚠ DnsTimeout` / `⚠ TcpRstEarly` поднимают конкретные диагностические сигналы.
+- **Pre-session backfill** — last 60s matching events копируются в новую recording-сессию.
+- **Three-stream Log Viewer** — Internal логи лаунчера / Core лог-файл sing-box / Clash API клиент, фильтр по уровню, rotation-safe.
+- **IP-check tools** — STUN (UDP) и HTTPS-провайдеры (2ip.ru и др.) для внешней проверки IP.
 
-### 🎯 Что он дает
+### Надёжность
 
-- 🚀 **Запуск/остановка TUN режима одним кликом**  
-- 📝 **Полный доступ к `config.json` прямо в лаунчере**  
-  (редактируй → сохраняй → sing-box перезапускается автоматически)
-- 🔄 **Автоматический парсинг любых типов подписок**  
-  (vless / vmess / trojan / ss / hysteria / hysteria2 / tuic)  
-  + фильтры по тегам и регулярным выражениям
-- 🌐 **Выбор сервера с проверкой ping через Clash Meta API**  
-- 🔧 **Инструменты диагностики**: проверка IP, STUN тест, убийца процессов  
-- 📊 **Интеграция с системным треем + читаемые логи**
+- **Auto-restart with stability window** — 3 попытки × 180 с, счётчик сбрасывается после стабильной работы; UI показывает `[restart 2/3]` во время recovery.
+- **Atomic file writes** — `stage → rename` для config / state / settings; нет полузаписанных файлов при `kill -9` или потере питания.
+- **Power-event aware** — sleep/resume listener; HTTP-запросы не висят после wake.
+- **Configuration overlay** — state хранит ссылки на template + diff пользовательских изменений; bump шаблона приносит обновления автоматически, персональные правки остаются сверху.
+- **Auto-update подписок** — heartbeat раз в час обновляет только просроченные источники; immediate retry на VPN-event с anti-storm cooldown.
 
-**🔗 Ссылки:**
-- **GitHub:** https://github.com/Leadaxe/singbox-launcher  
-- **Пример конфигурации:** https://github.com/Leadaxe/singbox-launcher/blob/main/bin/config.example.json
+### Системная интеграция
 
-## 📋 Требования
+- **System tray** — start / stop, переключатель прокси (когда Clash API on), открыть главное окно, выход. Активный outbound отражается в трее.
+- **Keyboard shortcuts** — `⌘R` / `Ctrl+R` reconnect (kill sing-box для restart), `⌘U` / `Ctrl+U` обновить подписки, `⌘P` / `Ctrl+P` пинг всех прокси.
+- **CLI флаги** — `-start` (auto-start VPN при запуске), `-tray` (старт минимизированным в трей). Удобно для автозапуска, system services, headless deployment.
+- **Auto-loaders** — список прокси восстанавливается при каждом старте sing-box; активный outbound сохраняется между перезапусками.
+- **Share URI** — правый клик на любой прокси в Servers tab → **Copy link** генерирует share URI (`vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`, `wireguard://`) из соответствующего outbound в `config.json`.
+
+### Power-инструменты
+
+- **Debug API** — локальный HTTP API (28 endpoints, bearer-auth, off by default) для чтения/записи state, action-триггеров, управления capture трафика. См. [Headless control plane](#headless-control-plane--debug-api).
+- **Configurator** — 6-tab визуальный редактор (Sources / Outbounds / Rules / DNS / Settings / Preview) со schema validation, named state snapshots, атомарным save.
+- **Snapshot для support** — `GET /debug/snapshot` или кнопка **Copy snapshot** упаковывает template + state + cache + config в один JSON для bug-report.
+- **Verbose toggle** — `🔬 dbg` кнопка в Traffic Profiler переключает `log_level=debug` с atomic rebuild и revert.
+
+### Дистрибуция
+
+- **Кросс-платформенность** — Windows 10/11 (полностью протестировано), Windows 7 через legacy-сборку, macOS 11+ universal (Apple Silicon + Intel), Linux (сборка из исходников).
+- **11 локалей UI** — English, Русский, Deutsch, Español, Français, Italiano, 日本語, 한국어, Português (BR), Türkçe, 中文.
+- **Self-update** — pinned версия sing-box автоматически перекачивается при mismatch; проверка self-update лаунчера при старте с уведомлением (без тихой установки).
+
+## Быстрый старт
+
+1. Скачайте релиз с [GitHub Releases](https://github.com/Leadaxe/singbox-launcher/releases) и установите (см. [Установка](#установка)).
+2. Откройте приложение → вкладка **Core** → кнопка **Download** скачает `sing-box` (и `wintun.dll` на Windows). Fallback на SourceForge mirror, если GitHub недоступен.
+3. Кнопка **Configurator** → вставьте subscription URL на вкладке **Sources** → пройдите Outbounds / Rules / DNS / Settings / Preview → **Save**.
+4. Назад в **Core** → **Start**. Переключайте серверы во вкладке **Servers**, наблюдайте за трафиком через кнопку **Traffic Profiler** в Diagnostics.
+
+### Флаги командной строки
+
+```bash
+singbox-launcher -start         # авто-старт VPN при запуске
+singbox-launcher -tray          # старт минимизированным в системный трей
+singbox-launcher -start -tray   # комбинация — headless autostart-сценарий
+```
+
+Удобно для OS-level автозапуска (`LaunchAgents` / `Task Scheduler` / `systemd --user`) и для запуска лаунчера как background-сервиса, который управляет sing-box без показа окна.
+
+## Тур по возможностям
+
+### Управление несколькими подписками
+
+![Переключение серверов между подписками](docs/screenshots/02-server-switching.png)
+
+Подключайте несколько источников подписок, у каждой — свой график обновления и per-source raw cache. Вкладка **Servers** показывает selector-группы (`proxy-out`, `vpn ①`, `ru VPN` и т. д.), определённые в ParserConfig, и пинг каждого сервера с переключением в один клик. Активный outbound отражается в трее — быстрая смена без открытия главного окна.
+
+`SubscriptionMeta` каждой подписки раскрывает состояние провайдера — название профиля, support URL, использование трафика (`UploadBytes` / `DownloadBytes` / `TotalBytes`), дата окончания, статус последнего fetch, announce-сообщения от провайдера (`📢` при success-with-announce, `⚠` при error-with-announce — actionable URL в UI).
+
+**Share URI** — правый клик на любую строку прокси в Servers tab → первая строка меню показывает Clash API outbound type (lowercase: `vless`, `vmess`, `trojan`, `selector`, `direct`, …), затем **Copy link** генерирует share URI из соответствующего outbound в `config.json` (или из записи WireGuard `endpoint[]`, если tag не является outbound). Удобно для переноса сервера на другое устройство или передачи коллеге.
+
+### Декларативная маршрутизация через preset bundles
+
+![Rules tab и Subscription identification](docs/screenshots/03-rules-and-hwid.png)
+
+Двухуровневая модель правил:
+
+- **Preset bundles** (community-maintained template) — самодостаточные rule-pack'и с типизированными переменными (`enum`, `dns_server`, `outbound` с whitelist'ами), локальными SRS rule-sets, условными фрагментами (`if` / `if_or`), и определениями DNS-серверов. Включаются чекбоксами. В комплекте готовые наборы: `ru-direct` (российский трафик → direct), `ads-all` (ad-block через SRS), маршрутизация Telegram, разделение BitTorrent и др.
+- **User rules** — ваши собственные правила с 5 типизированными kind'ами: IP/CIDR, домены (suffix / keyword / regex), процессы (по имени или regex пути), SRS URL, raw JSON.
+
+Matchers покрывают полную поверхность sing-box: domain (4 варианта), IP CIDR, порты, network, protocol, process, package name, GeoSite / GeoIP через SRS, composite rules с `invert`, per-rule outbound chain через селекторы (urltest / failover).
+
+Секция **Subscription identification** (справа) реализует [SPEC 061](SPECS/061-F-N-SUBSCRIPTION_HEADER_PROTOCOL/SPEC.md) — канонический XTLS / Remnawave subscription-header протокол. Random per-installation HWID, opt-out toggle, опциональный hash-based device model. Можно перегенерировать в любой момент.
+
+### Настройка DNS
+
+![Настройка DNS и About](docs/screenshots/04-dns-configuration.png)
+
+Включение/отключение каждого DNS-сервера, разные транспорты (UDP / DoH / local), стратегия (`prefer_ipv4` / `prefer_ipv6` / `ipv4_only` / `ipv6_only`), per-domain DNS-правила, направляющие на конкретные серверы (например, `domain=mysite.ru → test server`), выбор default DNS resolver. SRS-based domain rules поддерживаются через ту же библиотеку, что и правила маршрутизации.
+
+### TUN, диагностика и power-инструменты
+
+![TUN настройки и диагностика](docs/screenshots/05-tun-settings-and-diagnostics.png)
+
+TUN inbound (системный VPN-драйвер), MTU, выбор стека (system / gvisor), TLS root certificate store, URLTest target и интервал, кастомный proxy-in inbound — всё в визарде, без редактирования JSON.
+
+Power-инструменты справа:
+
+- **Log window** — три параллельных потока (Internal лог лаунчера / Core лог sing-box / Clash API клиент), фильтр по уровню, rotation-safe.
+- **Logs / Config folder** — открыть папку в Finder/Explorer одним кликом.
+- **Kill Sing-Box** — force restart, supervisor подхватит.
+- **Traffic Profiler** — см. ниже.
+- **IP check services** — STUN (UDP), HTTPS IP-check провайдеры (2ip.ru и др.).
+- **Debug API** — переключатель локального HTTP API; bearer token генерируется при первом включении и сохраняется между off/on.
+
+### Traffic Profiler
+
+![Traffic Profiler — event detail](docs/screenshots/06-traffic-profiler.png)
+
+Always-on фоновый capture с rolling buffer 60 секунд × 3000 events. Два источника, объединённые по conn-id: Clash API `/connections` (метаданные процесса от sing-box) и tail sing-box-лога (DNS resolves, router matches, outbound dials).
+
+Per-process view с четырьмя суб-вкладками:
+
+- **Live** — newest-first stream events с цветовой кодировкой по kind.
+- **Domains** — aggregated уникальные домены, отсортированные по байтам; tap раскрывает CNAME chain, все IPs, outbound chain, issues.
+- **IPs** — полезно для hostless connections (raw TCP без SNI sniff).
+- **Connections** — per-connection timeline; tap раскрывает rule, outbound, CNAME chain, issues.
+
+Issue classification — конкретные проблемы: `DnsTimeout` (DNS resolver не ответил), `TcpRstEarly` (TCP закрылся <1с с 0/0 байт — firewall RST / TLS fail / block). Verbose mode (🔬 dbg) переключает `log_level=debug` с atomic config rebuild и revert. Pre-session backfill копирует last 60s matching events в новую сессию — не теряете первые секунды проблемы, ради которой начинали recording.
+
+### Системный трей
+
+Tray-иконка остаётся видимой после закрытия главного окна и даёт:
+
+- **Start / Stop** sing-box.
+- **Переключатель прокси** — при включённом Clash API прокси активной группы появляются как submenu с отмеченным текущим выбором. Переключение из трея запускает тот же путь, что и переключение во вкладке Servers.
+- **Показать главное окно** / **Exit**.
+
+В сочетании с CLI флагом `-tray` это режим headless-стиля: лаунчер стартует скрытым, всем управляете из трея, главное окно открываете только когда нужна настройка.
+
+Keyboard shortcuts (работают независимо от текущей активной вкладки, кроме случая, когда фокус в текстовом поле):
+
+| Шорткат | Действие |
+| --- | --- |
+| `⌘R` / `Ctrl+R` | Reconnect (kill sing-box для restart — supervisor авто-восстанавливает) |
+| `⌘U` / `Ctrl+U` | Обновить подписки |
+| `⌘P` / `Ctrl+P` | Пинг всех прокси (то же, что кнопка ping-all во вкладке Servers) |
+
+### Headless control plane — Debug API
+
+Локальный HTTP API на `127.0.0.1`, bearer-auth, off by default. 28 endpoints в пяти группах:
+
+| Группа | Что покрывает |
+| --- | --- |
+| **Health & info** | health-check (без авторизации), версия лаунчера / sing-box / API |
+| **State read** | running state, активный прокси, группа, список прокси, full state, resolved outbounds |
+| **State write** | rules / DNS / DNS-rules с режимами `replace` и `append`, schema-validation перед commit'ом, mutex per state path |
+| **Actions** | start / stop / update-subs / ping-all / rebuild-config — синхронные триггеры |
+| **Traffic Profiler control** | start / stop / clear / live snapshot / sessions list / export / drop / processes / verbose toggle |
+| **Snapshot** | `/debug/snapshot` — template + state + cache + config одним JSON для bug-report |
+
+Use cases: скрипты автоматизации (`bash` + `curl`), MCP-обёртки для AI-агентов ([SPEC 038 §6.5](SPECS/038-F-C-DEBUG_API/SPEC.md)), CI/CD валидация новых шаблонов, headless deployment, регрессионные фикстуры. Публичного, документированного, скриптуемого HTTP API такого охвата нет ни у одного другого desktop sing-box клиента.
+
+Включается в **Settings → Debug API (localhost)**. Тот же `snapshot.Build()` дёргает кнопка **Copy snapshot** в Diagnostics — один клик упаковывает полный стейт для bug-report.
+
+### Auto-update и supervision
+
+- **Process supervision** — 3 попытки restart, окно стабильности 180 секунд сбрасывает счётчик, graceful shutdown с deadline 2 секунды. UI показывает `[restart 2/3]` во время recovery. Тот же паттерн, что у `systemd RestartSec` + `StartLimitBurst`.
+- **Per-source heartbeat** (раз в час) — обновляются только просроченные подписки, retry через 15 секунд при failure, immediate retry на VPN-event с cooldown 5 секунд против шторма.
+- **Atomic writes** — `stage → rename` для config, state, settings, per-source raw cache. Kill -9 или потеря питания никогда не оставит полузаписанный файл. Failed fetch никогда не перезапишет последний рабочий cached subscription body.
+- **Power-event aware** — sleep/resume listener; HTTP-запросы не висят после wake.
+- **Self-update** — pinned версия sing-box автоматически перекачивается при mismatch (SPEC 046); self-update лаунчера проверяется один раз при старте, popup при новой версии.
+
+## Совместимость с VPN-провайдерами
+
+Подтверждённая работа с каноническим subscription-header протоколом для следующих панелей:
+
+| Панель | Формат subscription URL | HWID-binding (SPEC 061) |
+| --- | --- | --- |
+| **Marzban** | `https://panel.example.com/sub/<token>` | да — `X-Hwid` + `X-Hwid-Limit` |
+| **Marzneshin** | `https://panel.example.com/sub/<token>` | да |
+| **Remnawave** | `https://panel.example.com/sub/<token>` | да — канонические XTLS-format announce headers |
+| **NashVPN** | `https://sub.example.com/<token>` | да — провайдер отдаёт пустое тело без HWID-headers |
+| **V2Board / Xboard** | `https://panel.example.com/api/v1/client/subscribe?token=<...>` | частично — только `subscription-userinfo` |
+| **3X-UI / X-UI** | прямые vless/vmess/trojan URI | n/a |
+| **Sing-box subscription** | любой совместимый источник `sing-box export` | n/a |
+
+User Agent: `singbox-launcher/<version> (<os> <arch>)`. Контроли приватности в Settings:
+
+- **Send device ID** — opt-out для `X-Hwid`. При отключении HWID-binding панели могут отказать в выдаче подписки.
+- **Hash device model** — отправляет `hash(model)` вместо чистой строки модели.
+- **Device ID (HWID)** — random UUIDv4, не выводится из железа. Перегенерировать в любой момент.
+
+## Требования
 
 ### Windows
-- **Рекомендуемые системы:** Windows 10/11 (x64)
-- **Режим совместимости:** Windows 7 (x86/x64) через отдельную сборку лаунчера `singbox-launcher-<version>-win7-32.zip`  
-  В этом режиме лаунчер использует фиксированную legacy-версию `sing-box` (1.13.2, 32-bit) и 32-битный `wintun.dll`, работающие как на Win7 x86, так и на Win7 x64.
-- [sing-box](https://github.com/SagerNet/sing-box/releases) (исполняемый файл)
-- [WinTun](https://www.wintun.net/) (wintun.dll) - лицензия MIT, можно распространять
+
+- **Рекомендуется:** Windows 10 / 11 (x64).
+- **Legacy:** Windows 7 (x86/x64) через отдельную сборку `singbox-launcher-<version>-win7-32.zip` с pinned legacy sing-box 1.13.2 (32-bit) и 32-bit `wintun.dll`.
+- [sing-box](https://github.com/SagerNet/sing-box/releases) — авто-загрузка через Core tab.
+- [WinTun](https://www.wintun.net/) (wintun.dll, лицензия MIT) — авто-загрузка через Core tab.
 
 ### macOS
 
-**Требования:**
-- **Универсальная сборка** (рекомендуется): macOS 11.0+ (Big Sur или новее) - поддерживает Apple Silicon и Intel Mac
-- **Сборка только для Intel**: macOS 10.15+ (Catalina или новее) - только Intel Mac
-- [sing-box](https://github.com/SagerNet/sing-box/releases) (исполняемый файл)
+- **Universal** (рекомендуется): macOS 11+ (Big Sur), поддерживает Apple Silicon и Intel.
+- **Intel-only legacy build**: macOS 10.15+ (Catalina).
+- [sing-box](https://github.com/SagerNet/sing-box/releases) — авто-загрузка через Core tab.
 
 ### Linux
 
-**⚠️ Примечание**: Сборки для Linux не доступны. Процесс сборки и работы нуждается в тестировании. Мы ищем помощь с тестированием и обратной связью!
+Готовые сборки не распространяются. Сборка из исходников — см. [Сборка из исходников](#сборка-из-исходников). Помощь с тестированием на популярных дистрибутивах приветствуется — открывайте issue с feedback.
 
-**Требования:**
-- Современный дистрибутив Linux (x64)
-- [sing-box](https://github.com/SagerNet/sing-box/releases) (исполняемый файл)
-
-Если вы можете помочь с тестированием на Linux, пожалуйста, откройте issue или pull request на GitHub!
-
-## 📦 Установка
+## Установка
 
 ### Windows
 
-1. Скачайте последний релиз с [GitHub Releases](https://github.com/Leadaxe/singbox-launcher/releases)  
-   - для Windows 10/11 (x64) — обычный релизный архив для Windows;
-   - для Windows 7 (x86/x64) — архив `singbox-launcher-<version>-win7-32.zip` (отдельная legacy-сборка).
-2. Распакуйте архив в любую папку (например, `C:\Program Files\singbox-launcher`)
-3. Поместите `config.json` в папку `bin\`:
-   - Скопируйте `config.example.json` в `config.json` и настройте под себя
-4. Запустите `singbox-launcher.exe`
-5. **Автоматическое скачивание** (рекомендуется):
-   - Перейдите на вкладку **"Core"**
-   - Нажмите **"Download"** для скачивания `sing-box.exe` (лаунчер автоматически подберёт совместимый бинарник для вашей платформы; на Windows 7 используется фиксированная 32-битная версия 1.13.2)
-   - Нажмите **"Download wintun.dll"** при необходимости (автоматически скачает правильную архитектуру; на Windows 7 — 32-битный `wintun.dll`)
-   - Лаунчер автоматически скачает с GitHub или зеркала SourceForge, если GitHub недоступен
+1. Скачайте релиз с [GitHub Releases](https://github.com/Leadaxe/singbox-launcher/releases) — обычный архив для Win 10/11, `singbox-launcher-<version>-win7-32.zip` для Windows 7.
+2. Распакуйте в любую папку (например, `C:\Program Files\singbox-launcher`).
+3. Запустите `singbox-launcher.exe`.
+4. Вкладка **Core** → **Download** скачает `sing-box.exe`, затем **Download wintun.dll** при необходимости.
+5. Откройте **Configurator** → вставьте subscription URL → пройдите вкладки → **Save** → **Start**.
 
 ### macOS
 
-Есть два способа установки на macOS:
-
-#### Вариант 1: Скрипт установки (Рекомендуется)
-
-**⚠️ Важно**: Если вы столкнулись с проблемами совместимости (например, "Данная версия программы не может быть использована с этой версией macOS" на Apple Silicon или macOS Sequoia), используйте скрипт установки вместо ручной установки.
-
-**Быстрая установка (последняя версия):**
-
-1. Откройте Terminal (нажмите `Cmd + Space`, введите "Terminal", нажмите Enter)
-2. Скопируйте и вставьте эту команду:
+#### Вариант 1: install-скрипт (рекомендуется)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Leadaxe/singbox-launcher/main/scripts/install-macos.sh | bash
 ```
 
-3. Нажмите Enter и следуйте инструкциям (если спросят о восстановлении конфига, нажмите Enter чтобы пропустить)
-
-Скрипт автоматически:
-- Определит и скачает последнюю версию
-- Установит в `/Applications/`
-- Исправит атрибуты quarantine и права доступа macOS
-- Обеспечит совместимость с Apple Silicon и всеми версиями macOS
-- Откроет Finder с установленным приложением
-
-**Установка конкретной версии:**
+Устанавливает в `/Applications/`, снимает quarantine, чинит permissions, обеспечивает совместимость с Apple Silicon и свежими macOS. Для конкретной версии:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Leadaxe/singbox-launcher/main/scripts/install-macos.sh | bash -s -- v0.8.6
+curl -fsSL https://raw.githubusercontent.com/Leadaxe/singbox-launcher/main/scripts/install-macos.sh | bash -s -- v0.9.7
 ```
 
-Замените `v0.8.6` на нужную версию.
+#### Вариант 2: ручная установка
 
-#### Вариант 2: Ручная установка
-
-1. Скачайте последний релиз для macOS с [GitHub Releases](https://github.com/Leadaxe/singbox-launcher/releases)
-2. Распакуйте ZIP архив
-3. Удалите атрибут quarantine (требуется на macOS):
+1. Скачайте macOS ZIP с [Releases](https://github.com/Leadaxe/singbox-launcher/releases) и распакуйте.
+2. Снимите quarantine:
    ```bash
    xattr -cr "singbox-launcher.app" && chmod +x "singbox-launcher.app/Contents/MacOS/singbox-launcher"
    ```
-4. Для .app bundle: Двойной клик на `singbox-launcher.app` для запуска
-
-   Или из командной строки:
-   ```bash
-   open singbox-launcher.app
-   ```
-
-   Если macOS всё ещё блокирует приложение, перейдите в **Системные настройки → Конфиденциальность и безопасность** и нажмите **"Открыть всё равно"**, или щёлкните правой кнопкой мыши по приложению и выберите **"Открыть"** (только при первом запуске).
+3. Дважды кликните `singbox-launcher.app` или `open singbox-launcher.app` из терминала. Если macOS блокирует, разрешите через **System Settings → Privacy & Security → Open Anyway**.
 
 ### Linux
 
-**⚠️ Примечание**: Сборки для Linux не доступны. Необходимо собрать из исходников. Процесс сборки и работы нуждается в тестировании. Если вы столкнетесь с проблемами, пожалуйста, сообщите о них на GitHub.
+Соберите из исходников ([Сборка из исходников](#сборка-из-исходников)), затем:
 
-**Для сборки и запуска:**
-1. Соберите из исходников (см. раздел [Сборка из исходников](#-сборка-из-исходников))
-2. Сделайте исполняемым и запустите:
-   ```bash
-   chmod +x singbox-launcher
-   ./singbox-launcher
-   ```
-   
-   Лаунчер автоматически скачает `sing-box` и другие необходимые файлы при первом запуске.
-
-**Мы ищем помощь**: Если вы можете протестировать на Linux и предоставить обратную связь, пожалуйста, откройте issue на [GitHub Issues](https://github.com/Leadaxe/singbox-launcher/issues)!
-
-## 📖 Использование
-
-### Первый запуск
-
-#### Вариант 1: Использование Config Wizard (Рекомендуется)
-
-1. **Скачайте sing-box и wintun.dll** (если еще не установлены):
-   - Откройте вкладку **"Core"**
-   - Нажмите **"Download"** для скачивания `sing-box` (автоматически определит вашу платформу)
-   - На Windows нажмите **"Download wintun.dll"** при необходимости
-   - Файлы будут автоматически скачаны в папку `bin/`
-
-2. **Настройте через Wizard**:
-   - Если `config.json` отсутствует, нажмите синюю кнопку **"Wizard"** (⚙️) на вкладке **"Core"**
-   - Если `wizard_template.json` отсутствует, сначала нажмите **"Download Config Template"**
-   - Следуйте шагам визарда:
-     - **Вкладка 1 (Sources & ParserConfig)**: Введите URL подписки, настройте ParserConfig
-     - **Вкладка 2 (Rules)**: Выберите правила маршрутизации, настройте селекторы outbound
-     - **Вкладка 3 (Preview)**: Просмотрите сгенерированный конфиг и сохраните
-   - Визард автоматически создаст `config.json`
-
-3. Нажмите кнопку **"Start"** на вкладке **"Core"** для запуска sing-box
-
-#### Вариант 2: Ручная настройка
-
-1. Настройте `config.json` вручную (см. раздел [Конфигурация](#-конфигурация))
-2. **Скачайте sing-box и wintun.dll** (если еще не установлены):
-   - Откройте вкладку **"Core"**
-   - Нажмите **"Download"** для скачивания `sing-box` (автоматически определит вашу платформу)
-   - На Windows нажмите **"Download wintun.dll"** при необходимости
-3. Нажмите кнопку **"Start"** на вкладке **"Core"** для запуска sing-box
-
-### Основные функции
-
-#### Вкладка "Core"
-
-![Core Dashboard](https://github.com/user-attachments/assets/660d5f8d-6b2e-4dfa-ba6a-0c6906b383ee)
-
-- **Core Status** - Показывает статус работы sing-box (Running/Stopped/Error)
-  - Отображает счетчик перезапусков во время авто-перезапусков (например, `[restart 2/3]`)
-  - Счетчик автоматически сбрасывается после 3 минут стабильной работы
-- Кнопки **Start/Stop** - Управление процессом sing-box (синие, когда доступны)
-- **Sing-box Ver.** - Отображает установленную версию (кликабельно на Windows для открытия расположения файла)
-- Кнопка **"Update"** (🔄) - Скачать или обновить бинарник sing-box
-- **WinTun DLL** (только Windows) - Показывает статус wintun.dll и кнопку скачивания
-- **Config Status** - Показывает статус config.json и дату последней модификации (ГГГГ-ММ-ДД)
-- Кнопка **"Wizard"** (⚙️) - Открыть визард конфигурации (синяя, если config.json отсутствует)
-- Кнопка **"Update Config"** (🔄) - Обновить конфигурацию из подписок (отключена, если config.json отсутствует)
-- Кнопка **"Download Config Template"** - Скачать wizard_template.json (синяя, если шаблон отсутствует)
-- Автоматический fallback на зеркало SourceForge, если GitHub недоступен
-
-#### Вкладка "Diagnostics"
-- **Check Files** - Проверить наличие необходимых файлов
-- **Check STUN** - Определить внешний IP через STUN
-- Кнопки для проверки IP на различных сервисах
-
-#### Вкладка "Tools"
-- **Open Logs Folder** - Открыть папку с логами
-- **Open Config Folder** - Открыть папку с конфигурацией
-- **Kill Sing-Box** - Принудительно завершить процесс sing-box
-
-#### Вкладка "Clash API"
-
-![Clash API Dashboard](https://github.com/user-attachments/assets/389e3c08-f92e-4ef1-bea1-39074b9b6eca)
-
-- **Test API Connection** - Проверить подключение к Clash API
-- **Load Proxies** - Загрузить список прокси из выбранной группы
-- Переключение между прокси-серверами
-- Проверка задержки (ping) для каждого прокси
-- **Автозагрузчики**: Автоматически загружает прокси при старте sing-box
-- Вкладка визуально отключена (серая), когда sing-box не запущен
-
-### Config Wizard (v0.2.0)
-
-Config Wizard предоставляет визуальный интерфейс для настройки sing-box без ручного редактирования JSON файлов.
-
-![Config Wizard](https://github.com/user-attachments/assets/07d290c1-cdab-4fd4-bd12-a39c77b3bd68)
-
-**Доступ к визарду:**
-- Нажмите кнопку **"Wizard"** (⚙️) на вкладке **"Core"**
-- Кнопка синяя (высокая важность), если `config.json` отсутствует
-
-**Вкладки визарда:**
-
-1. **Sources & ParserConfig**
-   - Введите URL подписки или прямые ссылки (vless://, vmess://, trojan://, ss://, hysteria2://, ssh://) и проверьте доступность
-   - Поддерживаются как URL подписок, так и прямые ссылки (можно комбинировать, разделяя переносами строк)
-   - Настройте ParserConfig JSON в визуальном редакторе
-   - Просмотрите сгенерированные outbounds
-   - Распарсите подписку и сгенерируйте список прокси
-
-2. **Rules**
-
-![Clash API in Tray](https://github.com/user-attachments/assets/9801820b-501c-4221-ba56-96f3442445b0)
-
-   - **Правила из шаблона**: Выберите правила маршрутизации из шаблона
-     - Правила с `"default": true` включены по умолчанию
-     - Настройте селекторы outbound для каждого правила
-     - Правила с кнопкой `?` имеют описания (наведите курсор или нажмите для просмотра)
-   
-   - **Пользовательские правила**: Создайте свои собственные правила маршрутизации
-     - Нажмите кнопку **"➕ Add Rule"** для создания нового правила
-     - Выберите тип правила: **IP Addresses (CIDR)** или **Domains/URLs**
-     - Введите название правила и IP-адреса/домены (по одному на строку)
-     - Выберите outbound для правила
-     - Нажмите **"Add"** для сохранения правила
-     - Нажмите кнопку **"✏️"** (редактировать) для изменения существующего пользовательского правила
-     - Нажмите кнопку **"❌"** (удалить) для удаления пользовательского правила
-     - Пользовательские правила отображаются в том же списке, что и правила из шаблона
-   
-   - **Финальный Outbound**: Выберите outbound по умолчанию для неподходящего трафика
-   - **Автообновление превью**: Превью автоматически перегенерируется при переключении на вкладку Preview после внесения изменений
-   - Прокручиваемый список (70% высоты окна)
-
-3. **Preview**
-   - Превью сгенерированного конфига в реальном времени
-   - Валидация JSON перед сохранением (поддержка JSONC с комментариями)
-   - Автоматический бэкап существующего конфига (`config-old.json`, `config-old-1.json` и т.д.)
-   - Автоматическое закрытие после успешного сохранения
-
-**Особенности:**
-- Загружает существующую конфигурацию, если доступна
-- Использует `wizard_template.json` для правил по умолчанию
-- Поддержка JSONC (JSON с комментариями)
-- Автоматический бэкап перед сохранением
-- Навигация: кнопки Close/Next на первых двух вкладках, Close/Save на последней
-
-### System Tray
-
-Приложение работает в системном трее. Кликните по иконке для:
-- Открытия главного окна
-- Запуска/остановки VPN
-- Выбора прокси-сервера (если включен Clash API)
-- Выхода из приложения
-
-**Автозагрузчики**: Прокси автоматически загружаются из Clash API при старте sing-box.
-
-### Параметры командной строки
-
-Лаунчер поддерживает параметры командной строки для автоматизации запуска и настройки поведения приложения.
-
-**⚠️ Важно:** Лаунчер требует прав администратора для создания TUN интерфейса в Windows. Убедитесь, что приложение запускается с правами администратора.
-
-#### `-start`
-
-Автоматически запускает VPN при старте лаунчера.
-
-**Использование:**
 ```bash
-singbox-launcher.exe -start
+chmod +x singbox-launcher
+./singbox-launcher
 ```
 
-**Описание:**
-- При запуске с параметром `-start` лаунчер автоматически запустит sing-box через 1 секунду после инициализации
-- Полезно для настройки автозагрузки, чтобы VPN запускался автоматически при входе в систему
-- Параметр работает как в GUI режиме, так и при запуске из командной строки
-- **Требуются права администратора** для создания TUN интерфейса
+`sing-box` авто-скачивается при первом запуске в `bin/`. Если `sing-box` есть в `PATH` (например, из distro-пакета), лаунчер использует этот бинарь.
 
-**Примеры использования:**
-
-1. **Автозагрузка в Windows (с правами администратора):**
-   
-   **Вариант A: Через ярлык с запросом прав администратора**
-   - Создайте ярлык лаунчера
-   - Правой кнопкой мыши на ярлыке → **"Свойства"**
-   - На вкладке **"Ярлык"** добавьте параметр `-start` (или `-start -tray` для свернутого режима) в поле "Объект":
-     ```
-     "C:\Program Files\singbox-launcher\singbox-launcher.exe" -start -tray
-     ```
-   - Поместите ярлык в папку автозагрузки:
-     - `Win+R` → `shell:startup` → Enter
-     - Скопируйте ярлык в открывшуюся папку
-   - При каждом запуске Windows будет запрашивать права администратора через UAC
-
-   **Вариант B: Через Планировщик задач (рекомендуется)**
-   - Откройте "Планировщик заданий" (Task Scheduler)
-   - Создайте новую задачу (не простую задачу!)
-   - На вкладке **"Общие"**:
-     - Отметьте **"Выполнять с наивысшими правами"**
-     - Выберите **"Выполнять независимо от регистрации пользователя"**
-   - На вкладке **"Триггеры"**:
-     - Добавьте триггер **"При входе в систему"**
-   - На вкладке **"Действия"**:
-     - Действие: **"Запуск программы"**
-     - Программа или сценарий: путь к `singbox-launcher.exe`
-     - Добавить аргументы: `-start` (или `-start -tray` для запуска в свернутом виде)
-   - На вкладке **"Условия"**:
-     - Снимите галочку **"Запускать только при питании от электросети"** (если нужно запускать на ноутбуке)
-   - Сохраните задачу
-   - Задача будет автоматически запускаться с правами администратора при входе в систему
-
-   **Если лаунчер зависает при автозапуске из Планировщика** (не отвечает, приходится завершать через диспетчер задач):
-   - При триггере «При входе в систему» задача может стартовать до того, как рабочий стол и видеодрайвер полностью готовы — инициализация GUI (OpenGL, трей) тогда может зависнуть.
-   - **Обходной путь:** в том же триггере «При входе в систему» включите **задержку запуска**: в диалоге триггера нажмите «Дополнительно» и задайте «Отложить задачу на» **30 секунд** или **1 минуту**. После этого задача будет запускаться, когда сессия уже готова, и зависания обычно исчезают.
-
-**Примечания:**
-- Параметр можно комбинировать с другими параметрами (например, `-start -tray`)
-- **Для автозагрузки рекомендуется использовать Планировщик задач**, так как он более надежно обеспечивает запуск с правами администратора
-- При использовании ярлыка в папке автозагрузки Windows будет показывать запрос UAC при каждом входе в систему
-
-#### `-tray`
-
-Запускает лаунчер в свернутом виде (окно скрыто, работает только в системном трее).
-
-**Использование:**
-```bash
-singbox-launcher.exe -tray
-```
-
-**Описание:**
-- При запуске с параметром `-tray` главное окно лаунчера будет скрыто сразу после инициализации
-- Приложение будет работать только в системном трее
-- Окно можно открыть, кликнув по иконке в трее
-- Полезно для автозагрузки, когда не нужно показывать окно при старте
-
-**Примеры использования:**
-
-1. **Комбинация с `-start` для полной автоматизации:**
-   ```bash
-   singbox-launcher.exe -start -tray
-   ```
-   - Автоматически запустит VPN
-   - Окно будет скрыто
-   - Приложение работает только в трее
-
-2. **Автозагрузка в свернутом виде:**
-   - В Планировщике задач добавьте аргументы: `-start -tray`
-   - При входе в систему лаунчер запустится, автоматически запустит VPN и останется в трее
-
-**Примечания:**
-- Параметр можно комбинировать с `-start` для полной автоматизации
-- Окно можно открыть в любой момент, кликнув по иконке в системном трее
-- Если окно было открыто и закрыто пользователем, оно не будет автоматически скрыто при следующем запуске (если параметр `-tray` не указан)
-
-## ⚙️ Конфигурация
-
-### Структура папок
+## Структура папок
 
 ```
 singbox-launcher/
 ├── bin/
-│   ├── sing-box.exe (или sing-box для Unix) - автоматически скачивается через вкладку Core
-│   ├── wintun.dll (только Windows) - автоматически скачивается через вкладку Core
-│   ├── config.json - основная конфигурация (создается через визард или вручную)
-│   └── wizard_template.json - шаблон для визарда (автоматически скачивается, если отсутствует)
-├── logs/
-│   ├── singbox-launcher.log
-│   ├── sing-box.log
-│   └── api.log
-└── singbox-launcher.exe (или singbox-launcher для Unix)
+│   ├── sing-box(.exe)             — движок, авто-загрузка
+│   ├── wintun.dll                  — только Windows, авто-загрузка
+│   ├── config.json                 — sing-box runtime config (derived view)
+│   ├── wizard_template.json        — community template с preset bundles
+│   ├── wizard_states/<name>.json   — named state snapshots
+│   ├── subscriptions/<id>.raw      — per-source raw cache (SPEC 052)
+│   ├── rule_sets/*.srs             — кешированные SRS rule-sets
+│   └── logs/                       — sing-box.log + rotated history
+└── singbox-launcher(.exe)
 ```
 
-**Примечание:** `sing-box`, `wintun.dll` и `wizard_template.json` можно скачать автоматически через вкладку **Core**. Лаунчер:
-- Автоматически определит вашу платформу (Windows/macOS/Linux) и архитектуру (amd64/arm64)
-- Скачает правильную версию с GitHub или зеркала SourceForge (если GitHub заблокирован)
-- Установит файлы в правильное расположение
+Layout `bin/` — стабильный контракт, на который могут полагаться внешние инструменты (backup-скрипты, MCP-серверы, CI).
 
-**Linux:** если в `PATH` есть исполняемый файл `sing-box` (например, из пакета дистрибутива), лаунчер запускает его; иначе ожидается `bin/sing-box` рядом с лаунчером. Кнопка **Core → Download** по-прежнему записывает бинарник только в локальный `bin/`.
+## Сборка из исходников
 
-**Поддержка платформ**: Windows и macOS полностью поддерживаются. 
+См. платформо-специфичные гайды:
 
+- **Windows** — [docs/BUILD_WINDOWS.md](docs/BUILD_WINDOWS.md) (Go 1.24+, требуется GCC, опционально `rsrc` для иконки)
+- **macOS** — `./build/build_darwin.sh [universal|arm64|intel|catalina]`, опционально `-i` для установки/обновления в `/Applications`
+- **Linux** — [docs/BUILD_LINUX.md](docs/BUILD_LINUX.md) (Go 1.24+, OpenGL + X11 dev-пакеты, или Docker-сборка)
 
-### Настройка config.json
-
-Лаунчер использует стандартный конфигурационный файл sing-box. Подробная документация доступна на [официальном сайте sing-box](https://sing-box.sagernet.org/configuration/).
-
-#### Использование Config Wizard
-
-Самый простой способ настройки - использование **Config Wizard**:
-1. Нажмите кнопку **"Wizard"** (⚙️) на вкладке **"Core"**
-2. Следуйте пошаговым инструкциям
-3. Визард автоматически сгенерирует валидный `config.json`
-
-#### Ручная настройка
-
-Если вы предпочитаете редактировать `config.json` вручную, см. разделы ниже.
-
-#### Шаблон визарда (`wizard_template.json`)
-
-Файл `wizard_template.json` предоставляет шаблон для Config Wizard и определяет выбираемые правила маршрутизации. **Этот единый файл работает для всех платформ** (Windows, macOS, Linux).
-
-**Структура шаблона:**
-
-Унифицированный шаблон использует чистую JSON-структуру с четырьмя основными секциями:
-
-1. **`parser_config`** - Конфигурация парсера по умолчанию (подписки, группы аутбаундов, интервалы обновления)
-2. **`config`** - Основной конфиг sing-box (платформонезависимая часть: log, dns, route и т.д.)
-3. **`selectable_rules`** - Правила маршрутизации, выбираемые пользователем (отображаются как чекбоксы в визарде)
-4. **`params`** - Платформо-зависимые переопределения конфигурации (применяются на основе `runtime.GOOS`)
-
-**Ключевые особенности:**
-
-- **Никаких директив в комментариях** - Чистая JSON-структура, легко валидировать и поддерживать
-- **Платформо-зависимые через `params`** - Один файл шаблона с платформо-зависимыми секциями, применяемыми автоматически
-- **Самодостаточные правила** - Каждое `selectable_rule` включает свои определения `rule_set` (загружаются только когда правило включено)
-- **Фильтрация по платформам** - Правила могут фильтроваться по платформе с использованием поля `platforms`
-
-**Выбор Outbound:**
-
-Когда правило имеет поле `outbound`, визард предоставляет выпадающий список со следующими опциями:
-
-1. **Сгенерированные outbounds** - Все outbounds, созданные из подписок (например, `proxy-out`, `🇳🇱Netherlands` и т.д.)
-2. **`direct-out`** - Всегда доступен для прямых подключений (обход прокси)
-3. **`reject`** - Всегда доступен для блокировки трафика (преобразуется в `"action": "reject", "method": "drop"` в конфиге)
-
-**Пример структуры шаблона:**
-
-```jsonc
-{
-  "parser_config": {
-    "ParserConfig": {
-      "version": 4,
-      "proxies": [{ "source": "https://your-subscription-url-here" }],
-      "outbounds": [ /* группы прокси */ ]
-    }
-  },
-  "config": {
-    "log": { /* конфигурация логирования */ },
-    "dns": { /* конфигурация DNS */ },
-    "inbounds": [],
-    "outbounds": [{ "type": "direct", "tag": "direct-out" }],
-    "route": { /* конфигурация маршрутизации */ }
-  },
-  "selectable_rules": [
-    {
-      "label": "Блокировка рекламы",
-      "description": "Мягко блокировать рекламу, отклоняя соединения",
-      "default": true,
-      "rule_set": [ /* определения наборов правил */ ],
-      "rule": { "rule_set": "ads-all", "action": "reject" }
-    }
-  ],
-  "params": [
-    {
-      "name": "inbounds",
-      "platforms": ["windows", "linux"],
-      "value": [ /* конфигурация TUN */ ]
-    }
-  ]
-}
-```
-
-**Создание собственных шаблонов:**
-
-Вы можете создать свой собственный файл `wizard_template.json` для настройки правил, доступных в Config Wizard:
-
-1. **Начните с шаблона по умолчанию**: Скачайте шаблон по умолчанию через кнопку **"Download Config Template"**
-2. **Отредактируйте шаблон**: Измените `wizard_template.json` в папке `bin/`
-3. **Добавьте свои правила**: Добавьте записи в массив `selectable_rules` с `label`, `description`, `rule` и опциональным `rule_set`
-4. **Настройте ParserConfig**: Измените секцию `parser_config` для установки настроек подписок по умолчанию
-5. **Добавьте платформо-зависимые настройки**: Используйте секцию `params` для добавления платформо-зависимых конфигураций
-6. **Сохраните и используйте**: Визард автоматически будет использовать ваш кастомный шаблон
-
-**Пользовательские правила:**
-
-В дополнение к правилам из шаблона, пользователи могут создавать свои собственные правила прямо в визарде:
-
-- **Правила по IP-адресам**: Укажите IP-адреса или CIDR диапазоны (например, `192.168.1.0/24`, `10.0.0.1`)
-- **Правила по доменам/URL**: Укажите домены или URL (например, `example.com`, `*.example.com`)
-- Пользовательские правила сохраняются в `config.json` и сохраняются между сеансами визарда
-- Пользовательские правила отображаются вместе с правилами из шаблона на вкладке Rules
-- Каждое пользовательское правило может иметь свой собственный селектор outbound
-- Пользовательские правила поддерживают те же опции outbound, что и правила из шаблона (сгенерированные outbounds, `direct-out`, `reject`)
-
-**Формат правил в config.json:**
-
-Пользовательские правила сохраняются в стандартном формате правил sing-box:
-
-```jsonc
-{
-  "route": {
-    "rules": [
-      // Правила из шаблона...
-      {
-        "ip_cidr": ["192.168.1.0/24", "10.0.0.1"],
-        "outbound": "proxy-out"
-      },
-      {
-        "domain": ["example.com", "*.example.com"],
-        "outbound": "direct-out"
-      }
-    ]
-  }
-}
-```
-
-**📖 Полное руководство для провайдеров VPN:**
-
-Подробные инструкции по созданию собственного шаблона `wizard_template.json`:
-- **[docs/CREATE_WIZARD_TEMPLATE_RU.md](docs/CREATE_WIZARD_TEMPLATE_RU.md)** - Полное руководство с примерами и лучшими практиками
-- Руководство охватывает унифицированную JSON-структуру, платформо-зависимые конфигурации, настройку DNS, TUN vs Системный прокси и правила локального трафика
-
-**Примечание:** Файл шаблона должен быть валидным JSON. Визард проверяет шаблон перед использованием.
-
-#### Включение Clash API
-
-Для работы вкладки "Clash API" добавьте в `config.json`:
-
-```json
-{
-  "experimental": {
-    "clash_api": {
-      "external_controller": "127.0.0.1:9090",
-      "secret": "your-secret-token-here"
-    }
-  }
-}
-```
-
-#### Настройка парсера подписок
-
-Для автоматического обновления конфигурации из подписок настройте секцию `parser_config` в `wizard_template.json` или используйте Config Wizard.
-
-**Использование Config Wizard (Рекомендуется):**
-
-1. Откройте Config Wizard (нажмите кнопку **"Wizard"** на вкладке **"Core"**)
-2. Перейдите на вкладку **"Sources & ParserConfig"**
-3. Введите URL вашей подписки или прямые ссылки
-4. Настройте ParserConfig JSON в визуальном редакторе
-5. Визард сохранит конфигурацию в `config.json`
-
-**Ручная настройка:**
-
-Если вы предпочитаете редактировать вручную, конфигурация парсера хранится в `config.json` (загружается из `wizard_template.json` по умолчанию). Структура следует формату ParserConfig:
-
-```json
-{
-  "ParserConfig": {
-    "version": 4,
-    "proxies": [
-      {
-        "source": "https://your-subscription-url.com/subscription",
-        "connections": [
-          "vless://uuid@server.com:443?security=reality&...#ServerName",
-          "vmess://eyJ2IjoiMiIsInBzIjoi..."
-        ]
-      }
-    ],
-    "outbounds": [
-      {
-        "tag": "proxy-out",
-        "type": "selector",
-        "options": { "interrupt_exist_connections": true },
-        "filters": { "tag": "!/(🇷🇺)/i" },
-        "addOutbounds": ["direct-out"],
-        "preferredDefault": { "tag": "/🇳🇱/i" },
-        "comment": "Proxy group for international connections"
-      }
-    ],
-    "parser": {
-      "reload": "4h"
-    }
-  }
-}
-```
-
-📖 **Подробная документация:** [docs/ParserConfig.md](docs/ParserConfig.md)
-
-**Примечание:** Все это можно настроить визуально через Config Wizard (рекомендуется для начинающих). Ручное редактирование JSON - для продвинутых пользователей.
-
-## 🔄 Парсер подписок
-
-Парсер подписок - это встроенная функция, которая автоматически обновляет список прокси-серверов в `config.json` из подписок (subscription URLs).
-
-### Краткое описание
-
-Парсер:
-- Загружает подписки (поддерживаются протоколы: VLESS, VMess, Trojan, Shadowsocks, Hysteria2, SSH, WireGuard, **NaïveProxy**) из URL
-- Фильтрует узлы по заданным правилам
-- Группирует их в селекторы
-- Вставляет сгенерированные outbounds в начало массива `outbounds` в `config.json`
-
-### Быстрый старт
-
-Конфигурация парсера хранится в секции `ParserConfig` в `config.json` (загружается из `wizard_template.json` по умолчанию):
-
-```json
-{
-  "ParserConfig": {
-    "version": 4,
-    "proxies": [
-      { "source": "https://your-subscription-url-here" }
-    ],
-    "outbounds": [
-      {
-        "tag": "proxy-out",
-        "type": "selector",
-        "filters": { "tag": "!/(🇷🇺)/i" },
-        "addOutbounds": ["direct-out"]
-      }
-    ],
-    "parser": {
-      "reload": "4h"
-    }
-  }
-}
-```
-
-### Подробная документация
-
-📖 **Полная документация по парсеру:** [docs/ParserConfig.md](docs/ParserConfig.md)
-
-В документации вы найдете:
-- ✅ Подробное описание всех полей конфигурации
-- ✅ Большой пример с комментариями
-- ✅ Логику работы мигратора версий
-- ✅ Описание процесса обновления конфигурации
-- ✅ Примеры использования фильтров
-- ✅ Советы и особенности работы
-
-### Важные замечания
-
-1. **Остановите sing-box перед обновлением**
-   - Clash API может отреагировать на промежуточный файл
-   - Используйте кнопку "Stop VPN" перед "Update Config"
-
-2. **Автоматическая вставка outbounds**
-   - Сгенерированные outbounds автоматически вставляются в начало массива `outbounds` в `config.json`
-   - Статические outbounds (например, `direct-out`) остаются после сгенерированных
-
-3. **Автоматическая нормализация**
-   - Некорректный флаг `🇪🇳` автоматически заменяется на `🇬🇧`
-   - Можно расширить логику нормализации в коде парсера
-
-4. **Интеграция с UI**
-   - Вкладка "Clash API" автоматически подхватывает список селекторов
-   - По умолчанию выбирается селектор из `route.final` (если совпадает)
-   - Можно переключить через выпадающий список
-
-5. **Множественные подписки**
-   - Можно указать несколько подписок в массиве `proxies[]`
-   - Все узлы будут объединены и отфильтрованы вместе
-
-### Расширенная конфигурация
-
-**Фильтрация по нескольким критериям:**
-```json
-{
-  "proxies": [
-    {
-      "source": "https://subscription-url",
-      "connections": [
-        "vless://uuid@server.com:443?...#ServerName"
-      ],
-      "skip": [
-        { "tag": "/test/i" },
-        { "host": "slow-server.com" }
-      ]
-    }
-  ]
-}
-```
-
-**Сложные фильтры в селекторах:**
-```json
-{
-  "outbounds": [
-    {
-      "tag": "proxy-out",
-      "type": "selector",
-      "filters": {
-        "tag": "!/(🇷🇺|🇨🇳)/i",
-        "scheme": "vless"
-      }
-    }
-  ]
-}
-```
-
-**📖 Подробная документация по настройке парсера: [docs/ParserConfig.md](docs/ParserConfig.md)**
-
-**Примечание:** Все это можно настроить визуально через Config Wizard (рекомендуется для начинающих). Ручное редактирование JSON - для продвинутых пользователей.
-
-## 🏗️ Архитектура проекта
-
-```
-singbox-launcher/
-├── api/              # Clash API клиент
-├── assets/           # Иконки и ресурсы
-├── bin/              # Исполняемые файлы и конфигурация
-├── build/            # Скрипты сборки
-├── cmd/              # Точки входа приложения
-│   └── desktop/      # Desktop версия (будущее)
-├── core/             # Основная логика приложения
-├── internal/         # Внутренние пакеты
-│   └── platform/     # Платформо-специфичный код
-│       ├── platform_windows.go
-│       ├── platform_darwin.go
-│       └── platform_common.go
-├── ui/               # Пользовательский интерфейс
-├── logs/             # Логи приложения
-├── main.go           # Точка входа
-├── go.mod            # Зависимости Go
-└── README.md         # Этот файл
-```
-
-### Кроссплатформенность
-
-Проект использует build tags для условной компиляции платформо-специфичного кода:
-
-- `//go:build windows` - код для Windows
-- `//go:build darwin` - код для macOS
-- `//go:build linux` - код для Linux
-
-Платформо-специфичные функции вынесены в пакет `internal/platform`.
-
-## 🐛 Решение проблем
-
-### Sing-box не запускается
-
-1. **Скачайте sing-box**, если он отсутствует:
-   - Перейдите на вкладку **"Core"**
-   - Нажмите **"Download"** для автоматического скачивания sing-box
-   - На Windows также скачайте `wintun.dll`, если используется TUN режим
-2. **Используйте Config Wizard** для создания валидной конфигурации:
-   - Нажмите кнопку **"Wizard"** (⚙️) на вкладке **"Core"**
-   - Следуйте шагам визарда
-3. Проверьте наличие файла `sing-box.exe` (или `sing-box`) в папке `bin/`
-4. Проверьте корректность `config.json`
-5. Посмотрите логи в папке `logs/`
-
-### Config Wizard не работает
-
-1. **Скачайте шаблон конфигурации**, если он отсутствует:
-   - Нажмите кнопку **"Download Config Template"** на вкладке **"Core"**
-2. Убедитесь, что `wizard_template.json` существует в папке `bin/`
-3. Проверьте, что файл шаблона является валидным JSON
-
-### Clash API не работает
-
-1. Убедитесь, что в `config.json` включен `experimental.clash_api`
-2. Проверьте, что sing-box запущен (вкладка отключена, когда не запущен)
-3. Проверьте логи в `logs/api.log`
-
-### Проблемы с правами доступа (Linux/macOS)
-
-**Примечание**: Сборки для Linux не доступны. Если вы соберете из исходников и столкнетесь с проблемами, пожалуйста, сообщите о них.
-
-На Linux/macOS может потребоваться запуск с правами администратора для создания TUN интерфейса:
+Quick reference:
 
 ```bash
-sudo ./singbox-launcher
-```
-
-Или настройте права через `setcap` (Linux):
-
-```bash
-sudo setcap cap_net_admin+ep ./singbox-launcher
-```
-
-## 🔁 Автоперезапуск и стабильность
-
-Лаунчер включает интеллектуальную функцию автоперезапуска:
-
-**Возможности:**
-- Автоматический перезапуск при крашах (до 3 попыток)
-- Задержка 2 секунды перед перезапуском для правильной очистки
-- Мониторинг стабильности: счетчик сбрасывается после 180 секунд (3 минуты) стабильной работы
-- Визуальная обратная связь: счетчик перезапусков отображается в Core Status (например, `[restart 2/3]`)
-- Нет ложных предупреждений во время попыток автоперезапуска
-- Статус автоматически обновляется при сбросе счетчика
-
-**Поведение:**
-- Если sing-box падает, лаунчер автоматически попытается его перезапустить
-- После 3 неудачных попыток он останавливается и показывает сообщение об ошибке
-- Если sing-box работает стабильно 3 минуты после перезапуска, счетчик сбрасывается
-- Статус автоматически обновляется при сбросе счетчика
-
-## 🔨 Сборка из исходников
-
-### Предварительные требования
-
-- Go 1.24 или новее
-- Git
-- Для Windows: [rsrc](https://github.com/akavel/rsrc) для встраивания иконок (опционально)
-
-### Windows
-
-**Требования:**
-- Go 1.24 или новее ([скачать](https://go.dev/dl/))
-- **Компилятор C (GCC)** - ОБЯЗАТЕЛЬНО! ([TDM-GCC](https://jmeubank.github.io/tdm-gcc/) или [MinGW-w64](https://www.mingw-w64.org/))
-- CGO (включен по умолчанию)
-- Опционально: `rsrc` для встраивания иконки (`go install github.com/akavel/rsrc@latest`)
-
-**⚠️ Важно:** Если видите ошибку `gcc: executable file not found`, установите GCC (см. [docs/BUILD_WINDOWS.md](docs/BUILD_WINDOWS.md) раздел "Решение проблем")
-
-**Сборка:**
-
-1. Клонируйте репозиторий:
-```batch
 git clone https://github.com/Leadaxe/singbox-launcher.git
 cd singbox-launcher
-```
 
-2. Запустите скрипт сборки:
-```batch
+# macOS — universal binary, установка в /Applications
+./build/build_darwin.sh -i universal
+
+# Linux — сборочный скрипт с проверкой пакетов
+./build/build_linux.sh
+
+# Windows — см. docs/BUILD_WINDOWS.md
 build\build_windows.bat
 ```
 
-Или вручную:
-```batch
-go mod tidy
-go build -ldflags="-H windowsgui -s -w" -o singbox-launcher.exe
-```
+## Тесты
 
-**Подробная инструкция:** См. [docs/BUILD_WINDOWS.md](docs/BUILD_WINDOWS.md)
-
-### macOS
-
-**macOS:**
-
-**Требования:**
-- Полный Xcode (не только Command Line Tools) - требуется для универсальных сборок
-- Go 1.24 или новее
-
-**Варианты сборки:**
-
-1. **Универсальный бинарник** (рекомендуется - по умолчанию):
-   - Поддерживает как Apple Silicon (arm64), так и Intel (x86_64) Mac
-   - Требует macOS 11.0+ (Big Sur или новее)
-   - Создает `.app` бандл с правильной конфигурацией Info.plist
+Используйте централизованные скрипты в `build/` — они исключают GUI-пакеты, требующие OpenGL на headless-runner'ах:
 
 ```bash
-# Клонируйте репозиторий
-git clone https://github.com/Leadaxe/singbox-launcher.git
-cd singbox-launcher
-
-# Соберите универсальный бинарник (по умолчанию)
-./build/build_darwin.sh
-# или явно:
-./build/build_darwin.sh universal
+./build/test_linux.sh    # Linux
+./build/test_darwin.sh   # macOS
+build\test_windows.bat   # Windows
 ```
 
-2. **Только Apple Silicon** (`arm64`, быстрее — один `go build`, без `lipo`):
-   - Только для Mac на M-серии; минимум macOS 11.0+
+Чтобы запустить GUI-тесты локально, задайте `TEST_PACKAGE` в скрипте или вызовите `go test` напрямую на нужном пути.
 
-```bash
-./build/build_darwin.sh arm64
-```
+## Документация
 
-3. **Только Intel** (`intel`, amd64, macOS 11.0+):
-   - Одна архитектура, без сборки universal
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — полная карта архитектуры проекта.
+- **[SPECS/CONSTITUTION.md](SPECS/CONSTITUTION.md)** — архитектурные инварианты.
+- **[SPECS/](SPECS/)** — 60+ спецификаций фич (HWID protocol, traffic profiler, debug API, preset bundles, state-as-template-diff, atomic writes, typed event bus, …).
+- **[docs/CREATE_WIZARD_TEMPLATE_RU.md](docs/CREATE_WIZARD_TEMPLATE_RU.md)** — гайд для VPN-провайдеров, поставляющих собственный `wizard_template.json`.
+- **[docs/ParserConfig.md](docs/ParserConfig.md)** — справочник по настройке парсера подписок.
+- **[docs/TRAFFIC_PROFILER.md](docs/TRAFFIC_PROFILER.md)** — внутренности и использование Traffic Profiler.
+- **[docs/TEMPLATE_REFERENCE.md](docs/TEMPLATE_REFERENCE.md)** — справочник схемы `wizard_template.json`.
 
-```bash
-./build/build_darwin.sh intel
-```
+## Решение проблем
 
-4. **Intel под Catalina** (`catalina`):
-   - amd64, минимум macOS 10.15
+| Симптом | Что проверить первым |
+| --- | --- |
+| sing-box не стартует | **Core → Download**, затем проверьте наличие `config.json`. Смотрите `bin/logs/sing-box.log`. |
+| Configurator открывается, но Save падает | Internal log в **Log window** — там лог schema-validation. |
+| Вкладка Clash API недоступна | sing-box не запущен (вкладка намеренно disabled, пока движок не поднят). |
+| Подписка возвращает пусто / ошибки | Проверьте **Subscription identification** в Settings — HWID-binding панели требуют `Send device ID` включённым. Смотрите tooltip ⚠ badge — там announce от провайдера. |
+| TUN не захватывает трафик (Linux/macOS) | Для TUN-интерфейса обычно нужен root: `sudo ./singbox-launcher` или `sudo setcap cap_net_admin+ep ./singbox-launcher` (Linux). |
+| Win7 32-bit: иконка в трее есть, окно пустое / без виджетов | OpenGL 2.0 против требования Fyne 2.1+ — см. [docs/WIN7_OPENGL.md](docs/WIN7_OPENGL.md), drop-in фикс через Mesa3D. |
+| Auto-update подписок молчит | Откройте **Settings → Subscriptions** — убедитесь, что `Auto-update subscriptions` включён. Heartbeat раз в час; immediate retry срабатывает на VPN-event. |
+| Нужен полный state для bug-report | **Diagnostics → Copy snapshot** упакует template + state + cache + config одним JSON. |
 
-```bash
-./build/build_darwin.sh catalina
-```
+## Вклад в проект
 
-**Установка / обновление в /Applications** (`-i`):
+Для значимых фич проект использует spec-driven workflow — пишется SPEC в `SPECS/`, описывающий схему, фазы, инварианты и acceptance criteria до кода. См. [AGENTS.md](AGENTS.md) (contributor guide) и [SPECS/README.md](SPECS/README.md) (closing-task checklist).
 
-- Если **`singbox-launcher.app` уже есть** в `/Applications`, меняется только исполняемый файл **`Contents/MacOS/singbox-launcher`** — каталоги **`Contents/MacOS/bin/`** (в т.ч. `config.json`) и **`logs/`** сохраняются.
-- Если приложения **ещё нет**, копируется **весь** `.app` (первая установка).
-- После успешного **`-i`** собранный **`singbox-launcher.app` в каталоге проекта удаляется** (в дереве репозитория от этой сборки ничего не остаётся).
+Стандартный flow:
 
-```bash
-./build/build_darwin.sh -i arm64
-# или: ./build/build_darwin.sh -i universal
-```
+1. Форк репозитория.
+2. Ветка от `develop` (`git checkout -b feature/your-feature`).
+3. Для нетривиальной работы — сначала draft SPEC и обсуждение.
+4. Коммит, push, Pull Request в `develop`.
 
-Не перезаписывайте весь `.app` через `cp -R`, если важны данные: лаунчер хранит конфиг рядом с бинарником (`…/Contents/MacOS/bin/`).
+Code style: `gofmt`, `golangci-lint`. Публичные функции должны быть задокументированы. Новые пути должны логировать start / success / error по `SPECS/CONSTITUTION.md §5`.
 
-Список опций: `./build/build_darwin.sh --help`.
+## Лицензия
 
-**Возможности скрипта сборки:**
-- Universal (`arm64` + `amd64`) или одна архитектура: `arm64` / `intel` / `catalina`
-- Флаг `-i` — установка/обновление в `/Applications` (при уже установленном приложении — только бинарник)
-- Создает правильную структуру `.app` бандла с Info.plist
-- Устанавливает правильный `LSMinimumSystemVersion` и приоритеты архитектур
-- Включает иконку приложения, если доступна
+GNU General Public License v3.0 — см. [LICENSE](LICENSE).
 
-**Ручная сборка** (не рекомендуется - не создает .app бандл):
-```bash
-GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o singbox-launcher
-```
+Коммерческое лицензирование от Leadaxe доступно для использований, несовместимых с GPLv3. Коммерческие условия согласуются приватно и не публикуются в репозитории. Контакт: [leadaxe@gmail.com](mailto:leadaxe@gmail.com). См. [LICENSING.md](LICENSING.md).
 
-### Linux
+## Благодарности
 
-**⚠️ Примечание**: Сборки для Linux не доступны. Процесс сборки и работы нуждается в тестировании. Помощь приветствуется!
+- [SagerNet/sing-box](https://github.com/SagerNet/sing-box) — proxy-движок.
+- [Fyne](https://fyne.io/) — кросс-платформенный UI-фреймворк.
+- Всем контрибьюторам проекта.
 
-**Linux:**
-```bash
-# Клонируйте репозиторий
-git clone https://github.com/Leadaxe/singbox-launcher.git
-cd singbox-launcher
+## Поддержка
 
-# Установите зависимости
-go mod download
-
-# Соберите проект
-./build/build_linux.sh
-```
-
-Или вручную:
-```bash
-GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o singbox-launcher
-```
-
-**Нужна помощь**: Если вы можете протестировать сборки на Linux, пожалуйста, поделитесь обратной связью на [GitHub Issues](https://github.com/Leadaxe/singbox-launcher/issues)!
-
-## 🤝 Вклад в проект
-
-Мы приветствуем вклад в развитие проекта! Пожалуйста:
-
-1. Форкните репозиторий
-2. Создайте ветку для вашей функции (`git checkout -b feature/AmazingFeature`)
-3. Закоммитьте изменения (`git commit -m 'Add some AmazingFeature'`)
-4. Запушьте в ветку (`git push origin feature/AmazingFeature`)
-5. Откройте Pull Request
-
-Крупные фичи ведём по **Spec Kit**: чеклист закрытия задачи — **[SPECS/README.md](SPECS/README.md#closing-task-checklist)**; для агентов и правил репозитория см. **[AGENTS.md](AGENTS.md)**.
-
-### Стиль кода
-
-- Следуйте стандартам Go: `gofmt`, `golint`
-- Добавляйте комментарии к публичным функциям
-- Пишите тесты для новой функциональности
-
-## 📄 Лицензия
-
-Проект распространяется на условиях [GNU General Public License v3.0](LICENSE).
-
-Коммерческая лицензия у Leadaxe — для сценариев, несовместимых с GPLv3. **Условия коммерческой лицензии согласовываются отдельно и не публикуются** в этом репозитории. Связь: [ledaxe@gmail.com](mailto:ledaxe@gmail.com). Подробнее: [LICENSING.md](LICENSING.md).
-
-## 🙏 Благодарности
-
-- [SagerNet/sing-box](https://github.com/SagerNet/sing-box) - за отличный прокси-клиент
-- [Fyne](https://fyne.io/) - за кроссплатформенный UI фреймворк
-- Всем контрибьюторам проекта
-
-## 📞 Поддержка
-
-- **Telegram**: [@singbox_launcher](https://t.me/singbox_launcher) - Канал для обсуждений
-- **Issues**: [GitHub Issues](https://github.com/Leadaxe/singbox-launcher/issues)
-
+- **Telegram-канал** — [@singbox_launcher](https://t.me/singbox_launcher)
+- **Issues** — [GitHub Issues](https://github.com/Leadaxe/singbox-launcher/issues)
 
 ---
 
-**Примечание**: Этот проект не связан с официальным проектом sing-box. Это независимая разработка для удобного управления sing-box.
-
+*Независимый проект. Не аффилирован с проектом sing-box.*

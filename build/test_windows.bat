@@ -178,9 +178,17 @@ if not defined PKGS (
 echo Packages to be tested:
 echo %PKGS%
 
-:: Run tests with output to file and on screen simultaneously
+:: Run tests with output to file and on screen simultaneously.
+::
+:: IMPORTANT: capture ERRORLEVEL exactly once on the line immediately
+:: after `go test`. A duplicated `set TEST_EXIT_CODE=%ERRORLEVEL%` on the
+:: next line silently overwrites the real exit code with 0 — because the
+:: first `set` itself succeeds and resets ERRORLEVEL=0, so the second
+:: capture grabs 0 instead of the test's actual exit code. This bit us
+:: in CI for months: Windows test failures were being swallowed and
+:: reported as job success (Ubuntu/macOS scripts use bash PIPESTATUS,
+:: so they were unaffected).
 go test %TEST_FLAGS% -count=1 %PKGS% > "%TEST_LOG%" 2>&1
-set TEST_EXIT_CODE=%ERRORLEVEL%
 set TEST_EXIT_CODE=%ERRORLEVEL%
 
 :: Показываем содержимое лога на экране

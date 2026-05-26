@@ -1,6 +1,8 @@
 package locale
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -44,6 +46,74 @@ type Settings struct {
 	// текущей AppVersion: если меньше → шаблон удаляется как протухший
 	// (формат шаблона мог разойтись между версиями). См. SPEC 046.
 	LastTemplateLauncherVersion string `json:"last_template_launcher_version,omitempty"`
+
+	// HWID — random UUIDv4 идентификатор устройства, отправляемый в
+	// `X-Hwid` заголовке при каждом fetch'е подписки. Lazy-generated
+	// (EnsureHWID): пустой строкой при первой инсталляции → генерируется и
+	// persist'ится на следующем Save. Пользователь может редактировать
+	// в Settings tab чтобы перенести HWID между установками (для HWID-binding
+	// провайдеров — иначе re-install съест ещё один device slot). См. SPEC 061.
+	HWID string `json:"hwid,omitempty"`
+
+	// SubscriptionSendHWID — отключает отправку всех 4 X-Hwid-* заголовков
+	// в subscription requests. *bool семантика: nil → дефолт (true, шлём),
+	// явный false → выключено. Различение нужно чтобы UI checkbox после
+	// первого тика не "забывал" пользовательский выбор. См. SPEC 061 §4.
+	SubscriptionSendHWID *bool `json:"subscription_send_hwid,omitempty"`
+
+	// SubscriptionDeviceModelHashed — если true, в `X-Device-Model` уходит
+	// sha256(model)[:16] (8 байт hex) вместо raw `MacBookPro18,1`.
+	// Провайдер всё ещё видит стабильный device-ID, но не leak'ает hardware
+	// family. См. SPEC 061 §4.
+	SubscriptionDeviceModelHashed bool `json:"subscription_device_model_hashed,omitempty"`
+}
+
+// ShouldSendHWID — true если флаг nil (default) или явно true.
+// Используется fetcher'ом подписки чтобы решить, добавлять X-Hwid-семейство
+// заголовков в request или нет.
+func (s *Settings) ShouldSendHWID() bool {
+	if s == nil {
+		return true
+	}
+	return s.SubscriptionSendHWID == nil || *s.SubscriptionSendHWID
+}
+
+// EnsureHWID возвращает существующий HWID (если уже сгенерирован), либо
+// генерирует свежий UUIDv4 и сохраняет в s.HWID. Caller отвечает за
+// persistence (SaveSettings) если нужно сохранить новый HWID на диск.
+//
+// UUIDv4 строится через crypto/rand (RFC 4122 §4.4): 16 random bytes,
+// version=4 (bits 12-15 of time_hi_and_version), variant=10 (bits 6-7 of
+// clock_seq_hi_and_reserved). Не тянем google/uuid ради 30 строк кода.
+func (s *Settings) EnsureHWID() string {
+	if s == nil {
+		return ""
+	}
+	if s.HWID != "" {
+		return s.HWID
+	}
+	s.HWID = GenerateUUIDv4()
+	return s.HWID
+}
+
+// GenerateUUIDv4 generates a fresh random UUIDv4 string in canonical
+// 8-4-4-4-12 hex form (lowercase). Used by Settings.EnsureHWID and the
+// Settings tab "Regenerate" button.
+//
+// Falls back to a zero-padded fake UUID if crypto/rand fails (extremely
+// unlikely on hosted platforms). Better than panic'ing inside the
+// settings-load path.
+func GenerateUUIDv4() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		debuglog.WarnLog("locale: crypto/rand for UUIDv4 failed: %v — falling back to zero UUID", err)
+		return "00000000-0000-4000-8000-000000000000"
+	}
+	// RFC 4122 §4.4: version=4 (bits 4-7 of byte 6), variant=10 (bits 6-7 of byte 8).
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	hexBytes := hex.EncodeToString(b[:])
+	return hexBytes[0:8] + "-" + hexBytes[8:12] + "-" + hexBytes[12:16] + "-" + hexBytes[16:20] + "-" + hexBytes[20:32]
 }
 
 // MarkTemplateInstalled persists the launcher version that just installed the

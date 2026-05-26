@@ -131,7 +131,9 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 
 	// SPEC 052 phase 8 polish: subscription status panel под Exit'ом —
 	// log потока операции + finалный toast (×, ✓/✗, auto-hide 20s).
-	contentItems = append(contentItems, widget.NewSeparator())
+	// Сепаратор перед панелью убран: панель сама невидима пока нет
+	// активной операции, и торчащая горизонтальная линия после Exit
+	// в idle-состоянии выглядела как visual noise.
 	contentItems = append(contentItems, tab.createSubsStatusBlock())
 
 	content := container.NewVBox(contentItems...)
@@ -1007,7 +1009,7 @@ func (tab *CoreDashboardTab) copyCurrentStateAs(id string) error {
 		return fmt.Errorf("write %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // best-effort cleanup of partial write
 		return fmt.Errorf("rename %s → %s: %w", tmp, dst, err)
 	}
 	debuglog.InfoLog("CoreDashboard: saved current state.json → %q.json", id)
@@ -1033,7 +1035,7 @@ func (tab *CoreDashboardTab) switchToNamedState(id string) error {
 		return fmt.Errorf("write %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // best-effort cleanup of partial write
 		return fmt.Errorf("rename %s → %s: %w", tmp, dst, err)
 	}
 	debuglog.InfoLog("CoreDashboard: switched state.json → %q", id)

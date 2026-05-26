@@ -26,7 +26,86 @@ const (
 	headerSupportURL            = "Support-Url"
 	headerProfileWebPageURL     = "Profile-Web-Page-Url"
 	headerContentDisposition    = "Content-Disposition"
+
+	// Announce-headers — провайдер шлёт их вместе с **пустым телом**, когда
+	// он не может вернуть подписку (HWID-лимит / region-block / expired
+	// trial / etc.). Без этого декода юзер видит только generic «empty
+	// subscription body» и не понимает что делать.
+	//
+	// Видел в дикой природе (Marzban / Sub-Store / NashVPN-style панели):
+	//
+	//   announce: base64:<UTF-8 message for the user>
+	//   announce-url: https://t.me/some_support_bot
+	//   x-hwid-limit: true
+	headerAnnounce    = "Announce"
+	headerAnnounceURL = "Announce-Url"
+
+	// HWID-family (Remnawave / Marzneshin / Marzban). Truthy values:
+	// "true" / "1" / "yes" / "on" (case-insensitive). See SPEC 061 §4.
+	headerHWIDActive            = "X-Hwid-Active"
+	headerHWIDNotSupported      = "X-Hwid-Not-Supported"
+	headerHWIDMaxDevicesReached = "X-Hwid-Max-Devices-Reached"
+	headerHWIDLimit             = "X-Hwid-Limit" // legacy alias of MaxDevicesReached
 )
+
+// truthyHeaderValue — common parse for `true`/`1`/`yes`/`on` (case-insensitive).
+// Used by every X-Hwid-* boolean and by ParseInlineComments for the few keys
+// that map onto bool fields.
+func truthyHeaderValue(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// ProviderAnnounce is re-exported from state for callsites that historically
+// referenced subscription.ProviderAnnounce. The struct lives in state so
+// SubscriptionMeta can carry it without circular imports — see
+// state/provider_announce.go for full semantics.
+type ProviderAnnounce = state.ProviderAnnounce
+
+// ParseAnnounce — вытаскивает provider-announce headers (см. константы выше)
+// из ответа. Возвращает «пустой» ProviderAnnounce если ни одного нет —
+// caller через IsEmpty решает, нужно ли заворачивать в специальную ошибку.
+//
+// Декодит `Announce` через тот же `decodeProfileTitle` helper (handles
+// `base64:` prefix + auto-detect bare base64), потому что провайдеры
+// шлют announce ровно тем же способом.
+//
+// Legacy alias mirroring: HWIDLimit (Marzban / v2RayTun) and
+// HWIDMaxDevicesReached (Remnawave) describe the same condition. When either
+// header is set we populate **both** flags so UI code can use whichever
+// field is more readable in context.
+func ParseAnnounce(h http.Header) state.ProviderAnnounce {
+	var a state.ProviderAnnounce
+	if h == nil {
+		return a
+	}
+	if v := strings.TrimSpace(h.Get(headerAnnounce)); v != "" {
+		a.Message = decodeProfileTitle(v)
+	}
+	if v := strings.TrimSpace(h.Get(headerAnnounceURL)); v != "" {
+		a.URL = v
+	}
+	if truthyHeaderValue(h.Get(headerHWIDActive)) {
+		a.HWIDActive = true
+	}
+	if truthyHeaderValue(h.Get(headerHWIDNotSupported)) {
+		a.HWIDNotSupported = true
+	}
+	limit := truthyHeaderValue(h.Get(headerHWIDLimit))
+	maxReached := truthyHeaderValue(h.Get(headerHWIDMaxDevicesReached))
+	if limit || maxReached {
+		// Aliased pair: mirror to both fields so callers can read either.
+		a.HWIDLimit = true
+		a.HWIDMaxDevicesReached = true
+	}
+	if v := strings.TrimSpace(h.Get(headerProfileTitle)); v != "" {
+		a.ProfileTitle = decodeProfileTitle(v)
+	}
+	return a
+}
 
 // ParseHeaders — извлекает метаданные подписки из HTTP response headers.
 //
@@ -65,6 +144,13 @@ func ParseHeaders(h http.Header) state.SubscriptionMeta {
 		if name := parseContentDispositionFilename(v); name != "" {
 			m.ContentDispositionFilename = name
 		}
+	}
+	// SPEC 061: announce headers also surface on a contentful 200 — the
+	// subscription works but the provider has a message ("trial expiring in
+	// 3 days", "device limit warning"). UI shows a 📢 badge in that case.
+	if ann := ParseAnnounce(h); !ann.IsEmpty() {
+		annCopy := ann
+		m.ProviderAnnounce = &annCopy
 	}
 	return m
 }
@@ -130,7 +216,27 @@ func ParseInlineComments(body []byte) state.SubscriptionMeta {
 			if name := parseContentDispositionFilename(value); name != "" {
 				m.ContentDispositionFilename = name
 			}
+		// SPEC 061 §5: announce / announce-url are valid inline too —
+		// static hosting (Gist / GitHub Pages) can't set HTTP headers but
+		// providers still want to surface notices through them.
+		// HWID-family flags are deliberately NOT mirrored here — they only
+		// make sense for server-side device counting, which static hosts
+		// don't have.
+		case "announce":
+			if m.ProviderAnnounce == nil {
+				m.ProviderAnnounce = &state.ProviderAnnounce{}
+			}
+			m.ProviderAnnounce.Message = decodeProfileTitle(value)
+		case "announce-url":
+			if m.ProviderAnnounce == nil {
+				m.ProviderAnnounce = &state.ProviderAnnounce{}
+			}
+			m.ProviderAnnounce.URL = value
 		}
+	}
+	// Drop the announce pointer if no field stuck (keeps state JSON tidy).
+	if m.ProviderAnnounce != nil && m.ProviderAnnounce.IsEmpty() {
+		m.ProviderAnnounce = nil
 	}
 	return m
 }
@@ -159,6 +265,9 @@ func MergeMeta(headers, inline state.SubscriptionMeta) state.SubscriptionMeta {
 	}
 	if out.ContentDispositionFilename == "" {
 		out.ContentDispositionFilename = inline.ContentDispositionFilename
+	}
+	if out.ProviderAnnounce == nil && inline.ProviderAnnounce != nil {
+		out.ProviderAnnounce = inline.ProviderAnnounce
 	}
 	return out
 }

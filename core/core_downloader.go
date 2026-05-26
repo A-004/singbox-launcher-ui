@@ -23,7 +23,7 @@ import (
 
 // Win7LegacyVersion — фиксированная версия sing-box для Windows 7 (legacy build).
 // Используется только для Win7-сборки лаунчера (GOOS=windows, GOARCH=386).
-const Win7LegacyVersion = "1.13.2"
+const Win7LegacyVersion = "1.13.12"
 
 // ReleaseInfo contains information about GitHub release
 type ReleaseInfo struct {

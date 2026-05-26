@@ -197,3 +197,40 @@ func TestRefreshSubscriptionsMetaAndCache_DeleteOrphans(t *testing.T) {
 		t.Errorf("kept raw missing: %v", err)
 	}
 }
+
+// TestRefreshSubscriptionsMetaAndCache_EmptyBodyDoesNotCache — SPEC 061:
+// 0-byte responses (HWID-binding panel returns empty + announce headers)
+// must NOT overwrite the raw cache. Subsequent Rebuild reads the previous
+// valid body instead of an empty one.
+func TestRefreshSubscriptionsMetaAndCache_EmptyBodyDoesNotCache(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// HTTP 200 + 0 bytes + announce — provider gate per SPEC 061.
+		w.Header().Set("Announce", "HWID limit reached")
+		w.Header().Set("Announce-Url", "https://t.me/support")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	execDir := t.TempDir()
+	if err := os.MkdirAll(platform.GetWizardStatesDir(execDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subsDir := platform.GetSubscriptionsDir(execDir)
+
+	s := state.New()
+	s.Connections.Sources = []state.Source{
+		{ID: "01EMPTY", Type: state.SourceTypeSubscription, Enabled: true, URL: srv.URL},
+	}
+	if err := s.Save(platform.GetWizardStatePath(execDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, _ := state.Load(platform.GetWizardStatePath(execDir))
+	refreshSubscriptionsMetaAndCache(loaded, execDir)
+
+	// raw file must NOT exist — 0-byte responses are not cached.
+	rawPath := filepath.Join(subsDir, "01EMPTY.raw")
+	if _, err := os.Stat(rawPath); err == nil {
+		t.Errorf("raw cache for empty body should not exist: %s", rawPath)
+	}
+}

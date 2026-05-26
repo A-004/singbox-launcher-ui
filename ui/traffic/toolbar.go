@@ -13,6 +13,7 @@ import (
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 
 	tprof "singbox-launcher/internal/traffic"
 )
@@ -31,8 +32,26 @@ import (
 //   - Clear all completed sessions
 //   - Help (opens SPEC excerpt in a dialog)
 func buildWindowToolbar(deps WindowDeps, win fyne.Window) fyne.CanvasObject {
-	verboseChk := widget.NewCheck("Verbose logs (debug)", nil)
+	// Use ttwidget.Check so the toggle can carry an explanatory tooltip.
+	// Plain widget.Check has no tooltip support; users couldn't tell what
+	// the checkbox does until they tried it (and got the «active
+	// connections will reset» confirm).
+	verboseChk := ttwidget.NewCheck("Verbose logs (debug)", nil)
 	verboseChk.SetChecked(isCurrentlyVerbose(deps))
+	verboseChk.SetToolTip(
+		"Switches sing-box log level between your saved value (off) and " +
+			"\"debug\" (on).\n\n" +
+			"OFF — only warnings/errors + basic connection events in " +
+			"sing-box.log. DNS-by-IP attribution may be incomplete; some " +
+			"TCP/UDP events lack the originating domain.\n\n" +
+			"ON — full DNS chain logged (CNAME → A → IP per query), " +
+			"protocol/fragment details, and the profiler can attribute " +
+			"every IP back to its originating domain. Use while diagnosing, " +
+			"then turn off.\n\n" +
+			"Cost: more CPU + faster log-file growth. Toggling triggers a " +
+			"sing-box restart, so active connections reset (you'll see a " +
+			"confirm dialog).",
+	)
 
 	verboseHint := widget.NewLabel("")
 	verboseHint.Importance = widget.WarningImportance
@@ -179,7 +198,7 @@ func exportSessionJSON(deps WindowDeps, win fyne.Window) {
 		if uc == nil {
 			return
 		}
-		defer uc.Close()
+		defer func() { _ = uc.Close() }()
 		if _, werr := uc.Write(data); werr != nil {
 			dialog.ShowError(werr, win)
 			return

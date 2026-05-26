@@ -3,6 +3,7 @@ package subscription
 import (
 	"net/http"
 	"singbox-launcher/core/state"
+	"strings"
 	"testing"
 )
 
@@ -269,6 +270,172 @@ func TestParseContentDispositionFilename_Variants(t *testing.T) {
 }
 
 // isEmptyMeta — true если все поля meta пусты.
+// TestParseAnnounce_NashVPNStyle — реальный заголовочный набор от NashVPN
+// (sub.towersflowerss.com): HWID-лимит + base64 announce + telegram URL.
+func TestParseAnnounce_NashVPNStyle(t *testing.T) {
+	h := http.Header{}
+	// "Вы достигли лимита устройств! ..." (RU)
+	h.Set("Announce", "base64:0JLRiyDQtNC+0YHRgtC40LPQvdGD0LvQuCDQu9C40LzQuNGC0LAg0YPRgdGC0YDQvtC50YHRgtCyIQ==")
+	h.Set("Announce-Url", "https://t.me/nash_vpn_bot")
+	h.Set("X-Hwid-Limit", "true")
+	h.Set("Profile-Title", "base64:TmFzaFZQTg==") // "NashVPN"
+
+	a := ParseAnnounce(h)
+	if a.IsEmpty() {
+		t.Fatalf("expected non-empty announce, got %+v", a)
+	}
+	if !a.HWIDLimit {
+		t.Errorf("HWIDLimit = false")
+	}
+	if a.URL != "https://t.me/nash_vpn_bot" {
+		t.Errorf("URL = %q", a.URL)
+	}
+	if a.ProfileTitle != "NashVPN" {
+		t.Errorf("ProfileTitle = %q (want decoded \"NashVPN\")", a.ProfileTitle)
+	}
+	// Message decoded — should be Russian text starting with "Вы достигли".
+	if !strings.HasPrefix(a.Message, "Вы достиг") {
+		t.Errorf("Message decoded prefix = %q, want Russian \"Вы достиг...\"", a.Message)
+	}
+}
+
+// TestParseAnnounce_PlainText — provider шлёт announce БЕЗ base64-wrapping.
+func TestParseAnnounce_PlainText(t *testing.T) {
+	h := http.Header{}
+	h.Set("Announce", "Your trial has expired. Renew below.")
+	h.Set("Announce-Url", "https://example.com/renew")
+	a := ParseAnnounce(h)
+	if a.IsEmpty() || a.HWIDLimit {
+		t.Fatalf("got %+v", a)
+	}
+	if a.Message != "Your trial has expired. Renew below." {
+		t.Errorf("Message = %q", a.Message)
+	}
+}
+
+// TestParseAnnounce_HWIDLimitVariants — провайдеры пишут флаг по-разному.
+func TestParseAnnounce_HWIDLimitVariants(t *testing.T) {
+	cases := map[string]bool{
+		"true":  true,
+		"True":  true,
+		"TRUE":  true,
+		"1":     true,
+		"yes":   true,
+		"on":    true,
+		"false": false,
+		"0":     false,
+		"":      false, // missing → false
+		"maybe": false, // unknown → false
+	}
+	for v, want := range cases {
+		t.Run("v="+v, func(t *testing.T) {
+			h := http.Header{}
+			if v != "" {
+				h.Set("X-Hwid-Limit", v)
+			}
+			a := ParseAnnounce(h)
+			if a.HWIDLimit != want {
+				t.Errorf("HWIDLimit for %q = %v, want %v", v, a.HWIDLimit, want)
+			}
+		})
+	}
+}
+
+// TestParseAnnounce_NilAndEmpty — defensive.
+func TestParseAnnounce_NilAndEmpty(t *testing.T) {
+	if a := ParseAnnounce(nil); !a.IsEmpty() {
+		t.Errorf("nil → %+v", a)
+	}
+	if a := ParseAnnounce(http.Header{}); !a.IsEmpty() {
+		t.Errorf("empty → %+v", a)
+	}
+}
+
+// TestParseAnnounce_HWIDFlagMatrix — all 4 HWID-* flags parse independently
+// (truthy / falsy / missing) and the legacy `X-Hwid-Limit` ↔
+// `X-Hwid-Max-Devices-Reached` alias mirrors both ways.
+func TestParseAnnounce_HWIDFlagMatrix(t *testing.T) {
+	cases := []struct {
+		name       string
+		headers    map[string]string
+		wantActive bool
+		wantNotSup bool
+		wantMax    bool
+		wantLimit  bool
+	}{
+		{
+			name:       "all four flags set",
+			headers:    map[string]string{"X-Hwid-Active": "true", "X-Hwid-Not-Supported": "1", "X-Hwid-Max-Devices-Reached": "yes", "X-Hwid-Limit": "on"},
+			wantActive: true, wantNotSup: true, wantMax: true, wantLimit: true,
+		},
+		{
+			name:       "legacy X-Hwid-Limit only → mirrors to MaxDevicesReached",
+			headers:    map[string]string{"X-Hwid-Limit": "true"},
+			wantMax:    true, wantLimit: true,
+		},
+		{
+			name:       "modern X-Hwid-Max-Devices-Reached only → mirrors to Limit",
+			headers:    map[string]string{"X-Hwid-Max-Devices-Reached": "true"},
+			wantMax:    true, wantLimit: true,
+		},
+		{
+			name:       "active without limit (informational badge)",
+			headers:    map[string]string{"X-Hwid-Active": "true"},
+			wantActive: true,
+		},
+		{
+			name:       "not-supported alone (panel says we forgot X-Hwid)",
+			headers:    map[string]string{"X-Hwid-Not-Supported": "true"},
+			wantNotSup: true,
+		},
+		{
+			name:    "all falsy / missing → no flags",
+			headers: map[string]string{"X-Hwid-Active": "false", "X-Hwid-Limit": "0"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := http.Header{}
+			for k, v := range c.headers {
+				h.Set(k, v)
+			}
+			a := ParseAnnounce(h)
+			if a.HWIDActive != c.wantActive {
+				t.Errorf("HWIDActive = %v, want %v", a.HWIDActive, c.wantActive)
+			}
+			if a.HWIDNotSupported != c.wantNotSup {
+				t.Errorf("HWIDNotSupported = %v, want %v", a.HWIDNotSupported, c.wantNotSup)
+			}
+			if a.HWIDMaxDevicesReached != c.wantMax {
+				t.Errorf("HWIDMaxDevicesReached = %v, want %v", a.HWIDMaxDevicesReached, c.wantMax)
+			}
+			if a.HWIDLimit != c.wantLimit {
+				t.Errorf("HWIDLimit = %v, want %v", a.HWIDLimit, c.wantLimit)
+			}
+		})
+	}
+}
+
+// TestParseInlineComments_Announce — SPEC 061 §5: announce / announce-url
+// also arrive as `#announce:` / `#announce-url:` inline on static hosts.
+func TestParseInlineComments_Announce(t *testing.T) {
+	body := []byte(
+		"#announce: Trial expires in 3 days. Renew at link below.\n" +
+			"#announce-url: https://example.com/renew\n" +
+			"vless://uuid@host:443#tokyo\n",
+	)
+	m := ParseInlineComments(body)
+	if m.ProviderAnnounce == nil {
+		t.Fatalf("ProviderAnnounce nil; meta = %+v", m)
+	}
+	if m.ProviderAnnounce.Message != "Trial expires in 3 days. Renew at link below." {
+		t.Errorf("Message = %q", m.ProviderAnnounce.Message)
+	}
+	if m.ProviderAnnounce.URL != "https://example.com/renew" {
+		t.Errorf("URL = %q", m.ProviderAnnounce.URL)
+	}
+}
+
 func isEmptyMeta(m state.SubscriptionMeta) bool {
 	return m.UserInfo == nil &&
 		m.ProfileTitle == "" &&
@@ -281,9 +448,11 @@ func isEmptyMeta(m state.SubscriptionMeta) bool {
 		m.LastStatus == "" &&
 		m.ErrorCount == 0 &&
 		m.LastErrorMsg == "" &&
+		m.LastErrorURL == "" &&
 		m.HTTPStatusCode == 0 &&
 		m.RawBodyBytes == 0 &&
 		m.NodesCountFetched == 0 &&
 		!m.Truncated &&
-		len(m.PreviewNodes) == 0
+		len(m.PreviewNodes) == 0 &&
+		m.ProviderAnnounce.IsEmpty()
 }

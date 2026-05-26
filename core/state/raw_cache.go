@@ -66,7 +66,17 @@ func rawPath(subsDir, id string) (string, error) {
 //
 // На любой ошибке .tmp убирается, оригинальный <id>.raw (если был)
 // остаётся целым.
+//
+// SPEC 061: empty body — НЕ кэшируем. Раньше HWID-binding панели возвращали
+// 0 байт под старым UA — мы это кэшировали, и Rebuild без force-update
+// строил config с пустым source. После Phase 2 (новый UA) ответы должны
+// стать contentful, но если провайдер всё равно вернул 0 байт (region
+// block / expired account), стоит сохранить **прежний** valid кэш, а не
+// затирать его пустотой.
 func WriteRawBody(subsDir, id string, body []byte) error {
+	if len(body) == 0 {
+		return nil
+	}
 	target, err := rawPath(subsDir, id)
 	if err != nil {
 		return err

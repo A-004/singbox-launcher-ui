@@ -2,15 +2,19 @@ package subscription
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"singbox-launcher/core/config/configtypes"
 	"singbox-launcher/core/state"
 	"singbox-launcher/internal/debuglog"
+	"singbox-launcher/internal/platform"
 )
 
 // NetworkRequestTimeout defines the timeout for network requests
@@ -51,6 +55,50 @@ var IsNetworkErrorFunc func(err error) bool
 // GetNetworkErrorMessageFunc is a function variable that should be set to core.GetNetworkErrorMessage
 var GetNetworkErrorMessageFunc func(err error) string
 
+// SubscriptionRequestSettings — minimal settings surface needed by fetcher
+// to build HWID-family request headers without importing internal/locale.
+//
+// Wired by core init (config_service.go) — same pattern as CreateHTTPClientFunc.
+// The hook returns a snapshot (value copy of relevant fields) so concurrent
+// settings edits don't race with an in-flight fetch.
+type SubscriptionRequestSettings struct {
+	HWID              string
+	SendHWID          bool
+	DeviceModelHashed bool
+}
+
+// LoadSubscriptionSettingsFunc is set by core init to read bin/settings.json
+// for the HWID-family headers. nil → fetcher sends no HWID headers (no-op
+// for non-HWID providers; HWID-binding panels respond with empty body, but
+// that's the same behavior as `subscription_send_hwid=false`).
+var LoadSubscriptionSettingsFunc func() SubscriptionRequestSettings
+
+// applySubscriptionRequestHeaders sets User-Agent + (when enabled) the four
+// X-Hwid-family headers on an outbound subscription request. Centralized so
+// FetchSubscriptionWithMeta and the legacy FetchSubscription wrapper stay
+// in lockstep — see SPEC 061 §"Request headers".
+func applySubscriptionRequestHeaders(req *http.Request) {
+	req.Header.Set("User-Agent", configtypes.BuildSubscriptionUserAgent())
+	if LoadSubscriptionSettingsFunc == nil {
+		return
+	}
+	s := LoadSubscriptionSettingsFunc()
+	if !s.SendHWID || s.HWID == "" {
+		return
+	}
+	req.Header.Set("X-Hwid", s.HWID)
+	req.Header.Set("X-Device-OS", platform.DeviceOS())
+	req.Header.Set("X-Ver-OS", platform.DeviceOSVersion())
+	model := platform.DeviceModel()
+	if s.DeviceModelHashed && model != "" {
+		sum := sha256.Sum256([]byte(model))
+		// 8 bytes = 16 hex chars — stable opaque ID per Remnawave HWID docs
+		// "hashed model" mode (caller knows exactly the field width).
+		model = hex.EncodeToString(sum[:8])
+	}
+	req.Header.Set("X-Device-Model", model)
+}
+
 // MaxSubscriptionResponseSize — лимит размера ответа от провайдера подписки.
 // Защита от memory exhaustion на патологически больших телах.
 const MaxSubscriptionResponseSize = 10 * 1024 * 1024 // 10 MB
@@ -75,16 +123,77 @@ type FetchResult struct {
 
 // FetchHTTPError — ошибка с не-200 status code; можно использовать
 // errors.As для извлечения StatusCode при формировании meta.error_count.
+//
+// SPEC 061: на 403/410/429/5xx провайдер может приложить announce-headers
+// («region blocked → @bot»). Парсим их в Announce поле — UI отрисует тот же
+// actionable диалог, что и для FetchAnnounceError.
 type FetchHTTPError struct {
 	StatusCode int
 	Hint       string
+	Announce   *state.ProviderAnnounce
 }
 
 func (e *FetchHTTPError) Error() string {
-	if e.Hint == "" {
-		return fmt.Sprintf("subscription server returned status %d", e.StatusCode)
+	base := fmt.Sprintf("subscription server returned status %d", e.StatusCode)
+	if e.Hint != "" {
+		base += " (" + e.Hint + ")"
 	}
-	return fmt.Sprintf("subscription server returned status %d (%s)", e.StatusCode, e.Hint)
+	if e.Announce != nil && !e.Announce.IsEmpty() && e.Announce.Message != "" {
+		base += ": " + e.Announce.Message
+	}
+	if e.Announce != nil && e.Announce.URL != "" {
+		base += "  →  " + e.Announce.URL
+	}
+	return base
+}
+
+// FetchAnnounceError — провайдер вернул HTTP 200 с **пустым телом** и
+// announce-headers, объясняющими причину (HWID-лимит, region-block,
+// expired trial, etc.). Это не «empty subscription body» в смысле
+// «пустая подписка» — это provider-side gate, и юзеру надо показать
+// что именно сказал провайдер + куда идти.
+//
+// errors.As вытаскивает структуру для UI: показать диалог с
+// message + кликабельной URL вместо плоской error-строки.
+//
+// Примеры в дикой природе:
+//
+//	NashVPN (Marzban-style):
+//	    announce: base64:<RU-сообщение про лимит устройств>
+//	    announce-url: https://t.me/nash_vpn_bot
+//	    x-hwid-limit: true
+//	    Body: 0 bytes
+//
+//	Sub-Store с истёкшим trial:
+//	    announce: Your trial has expired. Renew at the link.
+//	    announce-url: https://example.com/renew
+//	    Body: 0 bytes
+type FetchAnnounceError struct {
+	Announce state.ProviderAnnounce
+}
+
+func (e *FetchAnnounceError) Error() string {
+	a := e.Announce
+	var b strings.Builder
+	if a.ProfileTitle != "" {
+		b.WriteString(a.ProfileTitle)
+		b.WriteString(": ")
+	}
+	switch {
+	case a.Message != "":
+		b.WriteString(a.Message)
+	case a.HWIDMaxDevicesReached || a.HWIDLimit:
+		b.WriteString("subscription provider reports HWID/device limit reached")
+	case a.HWIDNotSupported:
+		b.WriteString("subscription provider says HWID identification is missing — check 'Send device identification' in Settings")
+	default:
+		b.WriteString("subscription provider returned empty body with announce header")
+	}
+	if a.URL != "" {
+		b.WriteString("  →  ")
+		b.WriteString(a.URL)
+	}
+	return b.String()
 }
 
 // FetchSubscriptionWithMeta — расширенная версия FetchSubscription,
@@ -111,7 +220,7 @@ func FetchSubscriptionWithMeta(url string) (*FetchResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("User-Agent", configtypes.SubscriptionUserAgent)
+	applySubscriptionRequestHeaders(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -127,10 +236,18 @@ func FetchSubscriptionWithMeta(url string) (*FetchResult, error) {
 	result := &FetchResult{HTTPStatus: resp.StatusCode}
 
 	if resp.StatusCode != http.StatusOK {
-		return result, &FetchHTTPError{
+		httpErr := &FetchHTTPError{
 			StatusCode: resp.StatusCode,
 			Hint:       explainHTTPStatus(resp.StatusCode),
 		}
+		// SPEC 061: announce headers on non-200 (e.g. 403 + "region blocked,
+		// see @bot"). Attach so UI can render the actionable dialog instead
+		// of a flat "HTTP 403".
+		if a := ParseAnnounce(resp.Header); !a.IsEmpty() {
+			ac := a
+			httpErr.Announce = &ac
+		}
+		return result, httpErr
 	}
 
 	limited := io.LimitReader(resp.Body, MaxSubscriptionResponseSize+1)
@@ -139,6 +256,14 @@ func FetchSubscriptionWithMeta(url string) (*FetchResult, error) {
 		return result, fmt.Errorf("read body: %w", err)
 	}
 	if len(rawBody) == 0 {
+		// Provider gate: HTTP 200 + 0 байт + announce headers → не «пустая
+		// подписка», а явное сообщение от провайдера (HWID-лимит, expired,
+		// region-block, …). Сохраняем как FetchAnnounceError чтобы UI мог
+		// показать декодированный текст + кликабельный URL вместо плоского
+		// «empty subscription body».
+		if a := ParseAnnounce(resp.Header); !a.IsEmpty() {
+			return result, &FetchAnnounceError{Announce: a}
+		}
 		return result, fmt.Errorf("empty subscription body")
 	}
 	if int64(len(rawBody)) > MaxSubscriptionResponseSize {
@@ -186,6 +311,17 @@ func IsHTTPError(err error) (*FetchHTTPError, bool) {
 	return nil, false
 }
 
+// IsAnnounceError — convenience-обёртка чтобы UI/CLI могли вытащить
+// провайдерский announce + URL из ошибки и нарисовать actionable дialog
+// (кликабельный URL, кнопка «открыть бота») вместо плоского текста.
+func IsAnnounceError(err error) (*FetchAnnounceError, bool) {
+	var ae *FetchAnnounceError
+	if errors.As(err, &ae) {
+		return ae, true
+	}
+	return nil, false
+}
+
 // FetchSubscription fetches subscription content from URL and decodes it.
 //
 // Deprecated: use FetchSubscriptionWithMeta — оно возвращает meta и
@@ -214,8 +350,9 @@ func FetchSubscription(url string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set user agent to avoid server detecting sing-box and returning JSON config
-	req.Header.Set("User-Agent", configtypes.SubscriptionUserAgent)
+	// SPEC 061 §"Request headers": singbox-launcher/<v> (<os> <arch>) UA +
+	// X-Hwid-family (when the user hasn't opted out via Settings).
+	applySubscriptionRequestHeaders(req)
 
 	resp, err := client.Do(req)
 	defer func() {

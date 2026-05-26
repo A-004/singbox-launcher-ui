@@ -26,6 +26,13 @@ type liveView struct {
 	list    *widget.List
 	statusL *widget.Label
 	unsub   func()
+
+	// paused — when true, new events from the profiler subscription are
+	// dropped instead of appended to v.events. The subscription itself
+	// stays open (profiler keeps recording in background); pause just
+	// freezes the live-view buffer so the user can read what's on screen
+	// without it scrolling away. Set via the Pause/Resume toggle.
+	paused bool
 }
 
 // liveFilter is the user's current filter state. Defaults: everything on,
@@ -82,13 +89,24 @@ func buildLiveView(deps WindowDeps) *liveView {
 		func(i widget.ListItemID, o fyne.CanvasObject) {
 			v.mu.Lock()
 			idxs := v.filteredIndices()
+			label := o.(*widget.Label)
 			if i < 0 || i >= len(idxs) {
 				v.mu.Unlock()
+				// Clear stale text — Fyne's List.Refresh() doesn't reliably
+				// re-query length when filter narrows the visible set, so
+				// previously-rendered rows can linger with old content.
+				// Defensive blank keeps the UI honest.
+				label.SetText("")
 				return
 			}
-			e := v.events[len(v.events)-1-idxs[i]] // newest first
+			// Newest-first display: reverse the FILTERED indices, not the
+			// whole events ring. Was previously `events[len(events)-1-idxs[i]]`
+			// which only happened to work when every event passed the filter
+			// — partial filters landed on the wrong indices (and on a 0-match
+			// filter, the early-return-without-clear above made it look like
+			// the filter did nothing at all).
+			e := v.events[idxs[len(idxs)-1-i]]
 			v.mu.Unlock()
-			label := o.(*widget.Label)
 			line := formatEventRow(e)
 			if e.ProcessName != "" {
 				line += "   [" + e.ProcessName + "]"
@@ -98,6 +116,23 @@ func buildLiveView(deps WindowDeps) *liveView {
 			label.SetText(line)
 		},
 	)
+	// Click row → detail dialog with every field of the event. Same UX
+	// as per-process Live sub-tab. Unselect immediately so re-clicking
+	// the same row re-fires.
+	v.list.OnSelected = func(id widget.ListItemID) {
+		v.mu.Lock()
+		idxs := v.filteredIndices()
+		var e tprof.TrafficEvent
+		ok := id >= 0 && int(id) < len(idxs)
+		if ok {
+			e = v.events[idxs[len(idxs)-1-int(id)]]
+		}
+		v.mu.Unlock()
+		v.list.UnselectAll()
+		if ok {
+			showEventDetail(parentWindowOf(deps), e)
+		}
+	}
 
 	// Filter controls.
 	searchEntry := widget.NewEntry()
@@ -125,8 +160,36 @@ func buildLiveView(deps WindowDeps) *liveView {
 	chipTCPc := mkCheck("TCP·", func(f *liveFilter) *bool { return &f.ShowTCPClose })
 	chipUDP := mkCheck("UDP", func(f *liveFilter) *bool { return &f.ShowUDP })
 
+	// Pause/Resume — freezes the live-view buffer so the user can read the
+	// current snapshot without it scrolling away. The background profiler
+	// keeps recording (the rolling buffer + any active session continue);
+	// only the in-tab append is gated. Toggle flips on each click.
+	pauseBtn := widget.NewButton("⏸ Pause", nil)
+	pauseBtn.OnTapped = func() {
+		v.mu.Lock()
+		v.paused = !v.paused
+		paused := v.paused
+		v.mu.Unlock()
+		if paused {
+			pauseBtn.SetText("▶ Resume")
+		} else {
+			pauseBtn.SetText("⏸ Pause")
+		}
+	}
+	// Clear — drops local view buffer (does NOT touch profiler's rolling
+	// buffer or any recording session). Cheap reset for noisy screens.
+	clearBtn := widget.NewButton("🗑 Clear", func() {
+		v.mu.Lock()
+		v.events = v.events[:0]
+		v.mu.Unlock()
+		v.list.Refresh()
+		updateStatus()
+	})
+
 	filterRow := container.NewHBox(
 		chipDNS, chipDNSx, chipTCP, chipTCPc, chipUDP,
+		layout.NewSpacer(),
+		pauseBtn, clearBtn,
 	)
 
 	top := container.NewVBox(
@@ -157,12 +220,20 @@ func buildLiveView(deps WindowDeps) *liveView {
 	updateStatus()
 
 	// Subscribe and pump events. fyne.Do to marshal onto UI thread.
+	// Pause gating: we always drain the channel (otherwise the profiler's
+	// subscriber backpressure would build up) but skip the append+refresh
+	// when v.paused is true. The profiler's own rolling buffer + any
+	// active recording session continue regardless of UI pause state.
 	ch, unsub := deps.Profiler.Subscribe()
 	v.unsub = unsub
 	go func() {
 		for e := range ch {
 			ee := e
 			v.mu.Lock()
+			if v.paused {
+				v.mu.Unlock()
+				continue
+			}
 			v.events = append(v.events, ee)
 			if len(v.events) > liveViewRingSize {
 				v.events = v.events[len(v.events)-liveViewRingSize:]
@@ -176,7 +247,6 @@ func buildLiveView(deps WindowDeps) *liveView {
 		}
 	}()
 
-	_ = layout.NewSpacer() // keep package import in case future toolbar
 	return v
 }
 

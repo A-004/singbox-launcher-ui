@@ -6,11 +6,18 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 
 	"singbox-launcher/core"
+	"singbox-launcher/core/events"
 	"singbox-launcher/internal/locale"
 	"singbox-launcher/ui/components"
 )
 
-// App manages the UI structure and tabs
+// App manages the UI structure and tabs.
+//
+// `overlay` and `content` exist for the optional main-window click-redirect
+// overlay (see `ui/wizard_overlay.go::wizardOverlayEnabled`). When the
+// feature flag is off, `content == tabs` (bare passthrough) and `overlay`
+// stays nil — clicks on the main window flow normally even while the
+// configurator is open.
 type App struct {
 	window      fyne.Window
 	core        *core.AppController
@@ -19,8 +26,7 @@ type App struct {
 	currentTab  *container.TabItem
 	content     fyne.CanvasObject
 	// overlay is a concrete ClickRedirect component from `ui/components`.
-	// Using the concrete type gives us precise typing and enables future
-	// interactions with overlay-specific methods if needed.
+	// nil when `wizardOverlayEnabled` is false (current default).
 	overlay *components.ClickRedirect
 }
 
@@ -32,7 +38,10 @@ func NewApp(window fyne.Window, controller *core.AppController) *App {
 	}
 
 	// Create tabs - Core is first (opens on startup)
-	// Создаем вкладку Core первой, чтобы её callback установился
+	// Создаем вкладку Core первой, чтобы её callback установился.
+	// Emoji-in-label (💡 default emoji presentation) — colour rendering
+	// via OS font fallback to Apple Color Emoji, matching sibling tabs
+	// (🖥️ Servers / ⚙️ Settings / 🔍 Diagnostics).
 	coreTabItem := container.NewTabItem(locale.T("app.tab.core"), CreateCoreDashboardTab(controller))
 	app.clashAPITab = container.NewTabItem(locale.T("app.tab.servers"), CreateClashAPITab(controller))
 	app.tabs = container.NewAppTabs(
@@ -63,7 +72,41 @@ func NewApp(window fyne.Window, controller *core.AppController) *App {
 	// Сохраняем оригинальный callback, который был установлен в CreateCoreDashboardTab
 	originalUpdateCoreStatusFunc := controller.UIService.UpdateCoreStatusFunc
 
+	// refreshCoreTabIcon — динамический emoji в табе Core по состоянию
+	// sing-box. Перерисовывает label + дёргает AppTabs.Refresh чтобы
+	// табстрип реально перечитал текст. Безопасно вызывать с UI-thread
+	// (caller wrap'ит в fyne.Do).
+	//
+	// Status-indicator paradigm (как у media-плеера):
+	//   ⏸️ Core  — stopped / idle (sing-box не запущен)
+	//   ▶️ Core  — running (sing-box активен)
+	//
+	// База берётся из локали (`Core` / `Ядро` / etc), эмодзи приклеивается
+	// тут чтобы не плодить per-state ключи в каждой локали.
+	coreLabelBase := locale.T("app.tab.core")
+	// Strip leading emoji + space from the locale base — text after the
+	// first space character. Locale strings ship with a default ▶️ (or
+	// previous attempt's icon) for the never-changed startup case; we
+	// override per-state below so the leading emoji from locale gets
+	// stripped to avoid double-icon.
+	if i := indexEmojiSep(coreLabelBase); i > 0 {
+		coreLabelBase = coreLabelBase[i:]
+	}
+	refreshCoreTabIcon := func() {
+		var icon string
+		switch {
+		case controller.RunningState != nil && controller.RunningState.IsRunning():
+			icon = "▶️"
+		default:
+			icon = "⏸️"
+		}
+		coreTabItem.Text = icon + " " + coreLabelBase
+		app.tabs.Refresh()
+	}
+
 	// Регистрируем комбинированный callback для обновления состояния вкладки Servers
+	// (legacy путь UpdateCoreStatusFunc — сохраняем пока на нём висят
+	// другие потребители: core_dashboard_tab.updateRunningStatus, etc.)
 	controller.UIService.UpdateCoreStatusFunc = func() {
 		// Вызываем оригинальный callback, если он есть
 		if originalUpdateCoreStatusFunc != nil {
@@ -75,11 +118,25 @@ func NewApp(window fyne.Window, controller *core.AppController) *App {
 		})
 	}
 
-	// Инициализируем состояние вкладки
-	app.updateClashAPITabState()
+	// Динамическая иконка Core подписывается на ТИПИЗИРОВАННЫЙ
+	// EventBus (SPEC 047), а не на legacy UpdateCoreStatusFunc — это
+	// канонический канал для cross-tab реакций на смену состояния
+	// sing-box. Тот же канал слушает auto_update / proxy-active-changed
+	// логика. Subscribe идемпотентен (одна handler-регистрация на NewApp).
+	if controller.EventBus != nil {
+		controller.EventBus.Subscribe(events.VpnStateChanged, func(_ events.Event) {
+			fyne.Do(refreshCoreTabIcon)
+		})
+	}
 
-	// Инициализируем overlay для перенаправления кликов на визард
-	// (реализация в ui/wizard_overlay.go)
+	// Инициализируем состояние вкладки + первичный рендер иконки Core.
+	// EventBus.Subscribe не fires backfill — рендерим вручную для startup'а.
+	app.updateClashAPITabState()
+	refreshCoreTabIcon()
+
+	// Инициализируем overlay для перенаправления кликов на визард.
+	// Поведение зависит от `wizardOverlayEnabled` (см. ui/wizard_overlay.go) —
+	// по дефолту выключено, главное окно работает параллельно с визардом.
 	InitWizardOverlay(app, controller)
 
 	// Main-window keyboard shortcuts for power users — matches the
@@ -122,7 +179,9 @@ func (a *App) GetTabs() *container.AppTabs {
 	return a.tabs
 }
 
-// GetContent returns the root content for the main window (tabs + overlay if any)
+// GetContent returns the root content for the main window (tabs alone when
+// the overlay is disabled, tabs+overlay when enabled — see
+// `wizardOverlayEnabled`).
 func (a *App) GetContent() fyne.CanvasObject {
 	if a.content != nil {
 		return a.content
@@ -164,4 +223,18 @@ func (a *App) updateClashAPITabState() {
 			a.tabs.Select(coreTab)
 		}
 	}
+}
+
+// indexEmojiSep — returns the byte index just AFTER the first ASCII
+// space following an emoji prefix in s ("🚀 Core" → 5, "Core" → 0).
+// Used to strip a baked-in emoji from the locale's app.tab.core string
+// so we can substitute a state-driven one at runtime without each
+// locale carrying separate `app.tab.core.running` keys.
+func indexEmojiSep(s string) int {
+	for i, r := range s {
+		if r == ' ' {
+			return i + 1 // byte index after the space
+		}
+	}
+	return 0
 }

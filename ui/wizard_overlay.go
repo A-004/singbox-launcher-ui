@@ -7,11 +7,41 @@ import (
 	"singbox-launcher/ui/components"
 )
 
+// wizardOverlayEnabled — feature flag for the main-window click-redirect
+// overlay. When true (legacy behavior pre-v0.9.8), an invisible overlay
+// sits on top of the main-window tabs while the configurator is open and
+// redirects every click to focus the configurator → main window becomes
+// effectively read-only.
+//
+// Set to false so users can drive Update / Restart / Start / Stop / Servers
+// tab in parallel with the configurator. Flip back to true if you need
+// the legacy "wizard owns the foreground" UX without ripping out the
+// implementation.
+//
+// Independent of the wizard's *internal* ChildWindowsOverlay
+// (`presenter.UpdateChildOverlay`), which still uses `components.ClickRedirect`
+// over its own tabs to keep child dialogs (Edit Outbound, View Source,
+// rule dialog) on top within the wizard window.
+const wizardOverlayEnabled = false
+
 // InitWizardOverlay creates the click redirect overlay, attaches it to the app content
 // and subscribes to UIService.OnStateChange so that overlay visibility follows
 // wizard open/close state. Extracted to a separate file for modularity and testability.
+//
+// When `wizardOverlayEnabled` is false (current default) this function is a
+// near no-op: `app.content` stays as the bare tabs and no OnStateChange
+// hook is registered, so clicks on the main window flow normally to their
+// targets while the wizard is open.
 func InitWizardOverlay(app *App, controller *core.AppController) {
 	if app == nil || controller == nil {
+		return
+	}
+
+	if !wizardOverlayEnabled {
+		// Main-window overlay disabled — leave app.content as the bare tabs
+		// so input passes through to Update / Restart / tab buttons even
+		// while the configurator is open.
+		app.content = app.tabs
 		return
 	}
 

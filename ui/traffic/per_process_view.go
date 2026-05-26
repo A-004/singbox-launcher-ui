@@ -64,11 +64,12 @@ func buildPerProcessView(deps WindowDeps, onRefresh func()) *perProcessView {
 		func() int { return len(v.liveItems) },
 		func() fyne.CanvasObject { return widget.NewLabel("...") },
 		func(i widget.ListItemID, o fyne.CanvasObject) {
+			label := o.(*widget.Label)
 			if i < 0 || i >= len(v.liveItems) {
+				label.SetText("")
 				return
 			}
 			e := v.liveItems[len(v.liveItems)-1-i]
-			label := o.(*widget.Label)
 			line := formatEventRow(e)
 			if e.Backfilled {
 				line = "〽 " + line
@@ -79,6 +80,21 @@ func buildPerProcessView(deps WindowDeps, onRefresh func()) *perProcessView {
 			label.SetText(line)
 		},
 	)
+	// Click row → detail dialog. Unselect right away so the next click
+	// (even on the same row) re-fires OnSelected.
+	v.liveList.OnSelected = func(id widget.ListItemID) {
+		v.mu.Lock()
+		ok := id >= 0 && int(id) < len(v.liveItems)
+		var e tprof.TrafficEvent
+		if ok {
+			e = v.liveItems[len(v.liveItems)-1-int(id)]
+		}
+		v.mu.Unlock()
+		v.liveList.UnselectAll()
+		if ok {
+			showEventDetail(v.parentWindow(), e)
+		}
+	}
 
 	v.domainsList = widget.NewList(
 		func() int { return len(v.domainsData) },

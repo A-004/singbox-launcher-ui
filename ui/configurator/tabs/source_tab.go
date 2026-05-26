@@ -355,9 +355,39 @@ func CreateSourcesTab(presenter *wizardpresentation.WizardPresenter) fyne.Canvas
 					}
 				}
 
+				// SPEC 061 Phase 3: ⚠ / 📢 icon-button — persistent affordance to
+				// open the source-error dialog when meta carries an error or a
+				// provider announce. Placed to the LEFT of copy/edit so the
+				// row's edit/delete cluster keeps a stable visual position.
+				var noticeBtn *fynewidget.HoverForwardButton
+				if isSubscription && meta != nil && (meta.LastStatus == "err" || (meta.ProviderAnnounce != nil && !meta.ProviderAnnounce.IsEmpty())) {
+					icon := theme.WarningIcon()
+					tooltipKey := "wizard.source.tooltip_error_details"
+					if meta.LastStatus != "err" {
+						// Success-with-notice path: provider sent content + announce.
+						// Use info-styled icon. We don't have an info-theme icon
+						// in our minimal set, fall back to QuestionIcon (📢-ish).
+						icon = theme.QuestionIcon()
+						tooltipKey = "wizard.source.tooltip_provider_notice"
+					}
+					srcLabel := shortLabel
+					metaCopy := meta // capture by value for closure (meta is *SubscriptionMeta, stable)
+					noticeBtn = fynewidget.NewHoverForwardButtonWithIcon("", icon, func() {
+						wizarddialogs.ShowSourceErrorDialog(guiState.Window, srcLabel, metaCopy)
+					}, rowGetter)
+					noticeBtn.Importance = widget.LowImportance
+					if nb, ok := interface{}(noticeBtn).(interface{ SetToolTip(string) }); ok {
+						nb.SetToolTip(locale.T(tooltipKey))
+					}
+				}
+
 				rowGutter := canvas.NewRectangle(color.Transparent)
 				rowGutter.SetMinSize(fyne.NewSize(scrollbarGutterWidth, 0))
-				rightControlsItems := []fyne.CanvasObject{copyBtn, editBtn}
+				rightControlsItems := []fyne.CanvasObject{}
+				if noticeBtn != nil {
+					rightControlsItems = append(rightControlsItems, noticeBtn)
+				}
+				rightControlsItems = append(rightControlsItems, copyBtn, editBtn)
 				if refreshBtn != nil {
 					rightControlsItems = append(rightControlsItems, refreshBtn)
 				}
@@ -554,78 +584,6 @@ func nodeDisplayLine(node *config.ParsedNode) string {
 		s = node.Scheme
 	}
 	return textnorm.NormalizeProxyDisplay(s)
-}
-
-// fetchAndParseSource fetches a subscription URL or parses a direct link and returns parsed nodes.
-func fetchAndParseSource(sourceURL string, skip []map[string]string) ([]*config.ParsedNode, error) {
-	sourceURL = strings.TrimSpace(sourceURL)
-	sourceURL = strings.ToValidUTF8(sourceURL, "")
-	if sourceURL == "" {
-		return nil, fmt.Errorf("empty source URL")
-	}
-	var nodes []*config.ParsedNode
-	tagCounts := make(map[string]int)
-	if subscription.IsSubscriptionURL(sourceURL) {
-		content, err := subscription.FetchSubscription(sourceURL)
-		if err != nil {
-			return nil, err
-		}
-		contentStr := string(content)
-		contentStr = strings.ReplaceAll(contentStr, "\r\n", "\n")
-		contentStr = strings.ReplaceAll(contentStr, "\r", "\n")
-		contentStr = strings.TrimSpace(contentStr)
-		if subscription.IsXrayJSONArrayBody(contentStr) {
-			arrayNodes, err := subscription.ParseNodesFromXrayJSONArray(contentStr, skip)
-			if err != nil {
-				return nil, err
-			}
-			for _, node := range arrayNodes {
-				if len(nodes) >= configtypes.MaxNodesPerSubscription {
-					debuglog.WarnLog("source_tab: fetchAndParseSource truncated at %d nodes (same limit as subscription loader)",
-						configtypes.MaxNodesPerSubscription)
-					break
-				}
-				if node.Jump != nil {
-					node.Jump.Tag = subscription.MakeTagUnique(node.Jump.Tag, tagCounts, "ConfigWizard")
-				}
-				node.Tag = subscription.MakeTagUnique(node.Tag, tagCounts, "ConfigWizard")
-				nodes = append(nodes, node)
-			}
-			return nodes, nil
-		}
-		for _, line := range strings.Split(contentStr, "\n") {
-			line = subscription.NormalizeSubscriptionTextLine(line)
-			if line == "" {
-				continue
-			}
-			if len(nodes) >= configtypes.MaxNodesPerSubscription {
-				debuglog.WarnLog("source_tab: fetchAndParseSource truncated at %d nodes (same limit as subscription loader)",
-					configtypes.MaxNodesPerSubscription)
-				break
-			}
-			node, err := subscription.ParseNode(line, skip)
-			if err != nil {
-				continue
-			}
-			if node != nil {
-				node.Tag = subscription.MakeTagUnique(node.Tag, tagCounts, "ConfigWizard")
-				nodes = append(nodes, node)
-			}
-		}
-		return nodes, nil
-	}
-	if subscription.IsDirectLink(sourceURL) {
-		node, err := subscription.ParseNode(sourceURL, skip)
-		if err != nil {
-			return nil, err
-		}
-		if node != nil {
-			node.Tag = subscription.MakeTagUnique(node.Tag, tagCounts, "ConfigWizard")
-			nodes = append(nodes, node)
-		}
-		return nodes, nil
-	}
-	return nil, fmt.Errorf("not a subscription URL or direct link")
 }
 
 // CreateOutboundsAndParserConfigTab creates the Outbounds and ParserConfig tab UI.

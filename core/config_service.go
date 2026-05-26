@@ -20,6 +20,7 @@ import (
 	"singbox-launcher/core/template"
 	"singbox-launcher/internal/debuglog"
 	"singbox-launcher/internal/dialogs"
+	"singbox-launcher/internal/locale"
 	"singbox-launcher/internal/platform"
 )
 
@@ -37,6 +38,33 @@ func NewConfigService(ac *AppController) *ConfigService {
 	subscription.CreateHTTPClientFunc = CreateHTTPClient
 	subscription.IsNetworkErrorFunc = IsNetworkError
 	subscription.GetNetworkErrorMessageFunc = GetNetworkErrorMessage
+	// SPEC 061 Phase 2: wire HWID-family request headers. fetcher.go can't
+	// import internal/locale (settings live there but subscription is a leaf
+	// package), so we surface a thin snapshot via a function variable. Hook
+	// lazily-generates + persists HWID on the first fetch after install so
+	// users don't get a "Settings tab → Save" detour before first Update.
+	subscription.LoadSubscriptionSettingsFunc = func() subscription.SubscriptionRequestSettings {
+		if ac == nil || ac.FileService == nil {
+			return subscription.SubscriptionRequestSettings{}
+		}
+		binDir := platform.GetBinDir(ac.FileService.ExecDir)
+		s := locale.LoadSettings(binDir)
+		// Generate-and-persist HWID on first use so subsequent fetches
+		// (and the Settings tab when the user opens it) see the same ID.
+		// Failure to persist is non-fatal — we just regenerate next time;
+		// nothing depends on stability across restarts until the user opts in.
+		if s.HWID == "" {
+			s.EnsureHWID()
+			if err := locale.SaveSettings(binDir, s); err != nil {
+				debuglog.WarnLog("ConfigService: persist generated HWID: %v", err)
+			}
+		}
+		return subscription.SubscriptionRequestSettings{
+			HWID:              s.HWID,
+			SendHWID:          s.ShouldSendHWID(),
+			DeviceModelHashed: s.SubscriptionDeviceModelHashed,
+		}
+	}
 	services.CreateHTTPClientFunc = CreateHTTPClient
 	return &ConfigService{ac: ac}
 }
@@ -733,8 +761,22 @@ func refreshOneSubscriptionSource(src *state.Source, defaults state.Defaults, su
 		src.Meta.LastStatus = "err"
 		src.Meta.ErrorCount++
 		src.Meta.LastErrorMsg = fetchErr.Error()
+		// SPEC 061: surface the structured announce on either error variant
+		// so UI can render an actionable dialog with the provider message +
+		// clickable URL, not just a flat error label.
+		src.Meta.ProviderAnnounce = nil
+		src.Meta.LastErrorURL = ""
+		if ae, ok := subscription.IsAnnounceError(fetchErr); ok {
+			a := ae.Announce
+			src.Meta.ProviderAnnounce = &a
+			src.Meta.LastErrorURL = a.URL
+		}
 		if httpErr, ok := subscription.IsHTTPError(fetchErr); ok {
 			src.Meta.HTTPStatusCode = httpErr.StatusCode
+			if httpErr.Announce != nil && !httpErr.Announce.IsEmpty() {
+				src.Meta.ProviderAnnounce = httpErr.Announce
+				src.Meta.LastErrorURL = httpErr.Announce.URL
+			}
 		} else if res != nil {
 			src.Meta.HTTPStatusCode = res.HTTPStatus
 		}
@@ -752,8 +794,12 @@ func refreshOneSubscriptionSource(src *state.Source, defaults state.Defaults, su
 	merged.LastStatus = "ok"
 	merged.ErrorCount = 0
 	merged.LastErrorMsg = ""
+	merged.LastErrorURL = ""
 	merged.HTTPStatusCode = res.HTTPStatus
 	merged.RawBodyBytes = res.RawBodyBytes
+	// ProviderAnnounce on success — only when the provider actually sent
+	// announce headers (already populated by ParseHeaders / ParseInlineComments
+	// into res.Meta). Otherwise stays nil so UI clears the 📢 badge.
 	// SPEC 054: для Xray JSON array подписок line-based extractPreviewNodes
 	// раздувал preview_nodes в 50 раз (одна "line" = весь JSON body ~1MB).
 	// Сначала пробуем формат-aware path через xray JSON parser; fallback на

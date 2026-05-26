@@ -117,8 +117,19 @@ func (p *WizardPresenter) CreateStateFromModel(comment, id string) *wizardmodels
 	// SPEC 056-R-N: full DNS sync → flat servers[]/rules[] через kind discriminator.
 	// Template DNS tag-set извлекаем из template.dns_options для split'а
 	// model.DNSServers на kind=template vs kind=user.
+	//
+	// SPEC 062-F-N: rules portion теперь order-aware через model.DNSRuleOrder.
+	// Reconcile сначала добавит slots для свежесозданных preset-ref'ов / user
+	// rules (например preset включён через Rules tab → нужен slot для его
+	// dns_rule). Затем SyncDNSByOrderToState обойдёт DNSRuleOrder и эмитит
+	// rules в правильном порядке. Если DNSRuleOrder пуст (legacy state) —
+	// fallback на DNSRulesText (через buildDNSRulesFromText внутри).
 	templateDNSTags := extractTemplateDNSTags(p.model.TemplateData)
-	state.DNS = wizardmodels.SyncDNSFullToStateV6(
+	wizardmodels.ReconcileDNSRuleOrder(p.model)
+	state.DNS = wizardmodels.SyncDNSByOrderToState(
+		p.model.DNSRuleOrder,
+		p.model.PresetRefs,
+		p.model.DNSUserRules,
 		p.model.DNSServers,
 		p.model.DNSRulesText,
 		p.model.DNSTemplateOverrides,
@@ -398,6 +409,25 @@ func (p *WizardPresenter) restorePresetRefs(state *wizardmodels.WizardStateFile)
 		// Reconcile в случае если в model.CustomRules / PresetRefs есть entries
 		// которые не попали в order (могут быть после миграции v5→v6).
 		wizardmodels.ReconcileRuleOrder(p.model)
+	}
+
+	// SPEC 062-F-N: restore DNSRuleOrder + DNSUserRules from state.DNS.Rules.
+	// PresetRefs уже выставлены выше — DNSRuleOrderFromStateRules может
+	// маппить kind=preset refs → PresetRefs[Index].
+	//
+	// На legacy state (state.DNS пуст или ещё нет SPEC 062 порядка) — restoreDNS
+	// уже заполнил model.DNSRulesText через populateUserDNSFromState; парсим
+	// его в DNSUserRules + RebuildDNSRuleOrder для дефолтного порядка.
+	dnsOrder, dnsUserRules := wizardmodels.DNSRuleOrderFromStateRules(state.DNS.Rules, p.model.PresetRefs)
+	if len(dnsOrder) > 0 {
+		p.model.DNSRuleOrder = dnsOrder
+		p.model.DNSUserRules = dnsUserRules
+		wizardmodels.ReconcileDNSRuleOrder(p.model)
+	} else {
+		// Legacy / empty: build DNSUserRules from DNSRulesText (populateUserDNSFromState
+		// уже его заполнил), then RebuildDNSRuleOrder для дефолтного user-then-preset.
+		p.model.DNSUserRules = wizardmodels.DNSUserRulesFromText(p.model.DNSRulesText)
+		wizardmodels.RebuildDNSRuleOrder(p.model)
 	}
 }
 
