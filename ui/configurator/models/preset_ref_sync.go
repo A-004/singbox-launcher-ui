@@ -289,16 +289,66 @@ func SyncDNSFullToStateV6(
 	templateOverrides map[string]bool,
 	templateDNSTags map[string]bool,
 ) state.DNSOptions {
+	cfg := syncDNSServersOnly(dnsServers, templateOverrides, templateDNSTags)
+	cfg.Rules = buildDNSRulesFromText(dnsRulesText)
+	return cfg
+}
+
+// SyncDNSByOrderToState — SPEC 062-F-N: full DNS sync с уважением к DNSRuleOrder.
+//
+// Зеркало SyncRulesByOrderToStateRulesV6 для DNS rules. Servers собираются
+// через тот же путь что SyncDNSFullToStateV6 (kind=template/preset/user
+// классификация по tag); rules собираются обходом DNSRuleOrder:
+//
+//	for slot in order:
+//	  if slot.Kind == DNSSlotKindPresetRef:
+//	    emit DNSRule{Kind=preset, Ref=presetRefs[idx].Ref, Enabled=...}
+//	  if slot.Kind == DNSSlotKindUser:
+//	    emit DNSRule{Kind=user, Body=userRules[idx].Body, Enabled=...}
+//
+// Если order пустой — fallback: rules из dnsRulesText как раньше (legacy
+// state.json который ещё не имеет DNSRuleOrder).
+//
+// **Не вызывает** SyncDNSOptionsWithActivePresets — это делается caller'ом
+// после получения результата. При непустом DNSRuleOrder presenter может
+// пропустить SyncDNSOptionsWithActivePresets вообще, так как DNSRuleOrder
+// уже определяет какие preset-rules в state.DNS.Rules.
+func SyncDNSByOrderToState(
+	order []DNSRuleSlot,
+	presetRefs []*PresetRefState,
+	userRules []DNSUserRule,
+	dnsServers []json.RawMessage,
+	dnsRulesText string,
+	templateOverrides map[string]bool,
+	templateDNSTags map[string]bool,
+) state.DNSOptions {
+	// Servers — same logic as SyncDNSFullToStateV6 (без rules портion).
+	cfg := syncDNSServersOnly(dnsServers, templateOverrides, templateDNSTags)
+
+	// Rules — order-aware (preferred) ИЛИ legacy fallback из dnsRulesText.
+	if len(order) > 0 {
+		cfg.Rules = buildDNSRulesFromOrder(order, presetRefs, userRules)
+	} else {
+		cfg.Rules = buildDNSRulesFromText(dnsRulesText)
+	}
+	return cfg
+}
+
+// syncDNSServersOnly — extract из SyncDNSFullToStateV6: только server portion.
+// Используется и старой SyncDNSFullToStateV6 (через её собственную копию ниже),
+// и новой SyncDNSByOrderToState.
+func syncDNSServersOnly(
+	dnsServers []json.RawMessage,
+	templateOverrides map[string]bool,
+	templateDNSTags map[string]bool,
+) state.DNSOptions {
 	cfg := state.DNSOptions{}
 
-	// Apply explicit overrides first — они побеждают enabled-флаг в raw body.
-	// (Юзер кликнул чекбокс — это явное волеизъявление.)
 	explicitOverrides := make(map[string]bool, len(templateOverrides))
 	for tag, enabled := range templateOverrides {
 		explicitOverrides[tag] = enabled
 	}
 
-	// Track seen tags чтобы не дублировать.
 	seenTemplateTags := make(map[string]bool)
 	seenUserTags := make(map[string]bool)
 	seenPresetRefs := make(map[string]bool)
@@ -313,12 +363,8 @@ func SyncDNSFullToStateV6(
 			continue
 		}
 
-		// Detect kind=preset (tag формата "<preset_id>:<local_tag>").
-		// Но НЕ если это известный template-tag (например template-серверы могут
-		// иметь "russian:something" если кто-то так назвал — но это edge case).
 		if templateDNSTags == nil || !templateDNSTags[tag] {
 			if idx := indexColon(tag); idx > 0 {
-				// kind=preset с ref'ом
 				ref := tag
 				if seenPresetRefs[ref] {
 					continue
@@ -378,9 +424,6 @@ func SyncDNSFullToStateV6(
 		}
 	}
 
-	// Если в overrides есть tag'и которых не было в dnsServers — добавим их как
-	// template entries. Так UI override'ы не теряются если юзер выключил
-	// template-server (он мог исчезнуть из dnsServers list'а).
 	for tag, enabled := range explicitOverrides {
 		if seenTemplateTags[tag] {
 			continue
@@ -396,30 +439,159 @@ func SyncDNSFullToStateV6(
 		seenTemplateTags[tag] = true
 	}
 
-	// DNS rules из dnsRulesText — kind=user.
-	if text := dnsRulesText; text != "" {
-		var parsed struct {
-			Rules []map[string]interface{} `json:"rules"`
-		}
-		if err := json.Unmarshal([]byte(text), &parsed); err == nil {
-			for _, body := range parsed.Rules {
-				clean := make(map[string]interface{}, len(body))
-				for k, v := range body {
-					if k == "enabled" {
-						continue
-					}
-					clean[k] = v
-				}
-				cfg.Rules = append(cfg.Rules, state.DNSRule{
-					Kind:    state.DNSRuleKindUser,
-					Enabled: true,
-					Body:    clean,
-				})
+	return cfg
+}
+
+// buildDNSRulesFromOrder — обходит DNSRuleOrder, dispatch по slot.Kind,
+// emit'ит state.DNSRule. Skip'ает slots с disabled toggle (user rule с
+// !Enabled, preset-ref с !pr.Enabled).
+//
+// Preset entry: Kind=preset, Ref=pr.Ref, Enabled=pr.IsDNSRuleEnabled().
+// User entry: Kind=user, Body=clone(ur.Body), Enabled=ur.Enabled.
+//
+// Rules в порядке slot'ов — это order in which sing-box применит first-match.
+func buildDNSRulesFromOrder(
+	order []DNSRuleSlot,
+	presetRefs []*PresetRefState,
+	userRules []DNSUserRule,
+) []state.DNSRule {
+	if len(order) == 0 {
+		return nil
+	}
+	out := make([]state.DNSRule, 0, len(order))
+	for _, slot := range order {
+		switch slot.Kind {
+		case DNSSlotKindPresetRef:
+			if slot.Index < 0 || slot.Index >= len(presetRefs) {
+				continue
 			}
+			pr := presetRefs[slot.Index]
+			if pr == nil || pr.Ref == "" {
+				continue
+			}
+			if !pr.Enabled {
+				// Preset выключен на уровне route rule — не эмитим dns_rule
+				// (тот же inv что SyncDNSOptionsWithActivePresets: !r.Enabled → skip).
+				continue
+			}
+			out = append(out, state.DNSRule{
+				Kind:    state.DNSRuleKindPreset,
+				Ref:     pr.Ref,
+				Enabled: pr.IsDNSRuleEnabled(),
+			})
+		case DNSSlotKindUser:
+			if slot.Index < 0 || slot.Index >= len(userRules) {
+				continue
+			}
+			ur := userRules[slot.Index]
+			if len(ur.Body) == 0 {
+				continue
+			}
+			body := make(map[string]interface{}, len(ur.Body))
+			for k, v := range ur.Body {
+				switch k {
+				case "kind", "ref", "enabled":
+					continue
+				}
+				body[k] = v
+			}
+			out = append(out, state.DNSRule{
+				Kind:    state.DNSRuleKindUser,
+				Enabled: ur.Enabled,
+				Body:    body,
+			})
 		}
 	}
+	return out
+}
 
-	return cfg
+// buildDNSRulesFromText — fallback для callsite'ов с пустым DNSRuleOrder.
+// Зеркало старого rules-блока в SyncDNSFullToStateV6.
+func buildDNSRulesFromText(dnsRulesText string) []state.DNSRule {
+	if dnsRulesText == "" {
+		return nil
+	}
+	var parsed struct {
+		Rules []map[string]interface{} `json:"rules"`
+	}
+	if err := json.Unmarshal([]byte(dnsRulesText), &parsed); err != nil {
+		return nil
+	}
+	out := make([]state.DNSRule, 0, len(parsed.Rules))
+	for _, body := range parsed.Rules {
+		clean := make(map[string]interface{}, len(body))
+		for k, v := range body {
+			if k == "enabled" {
+				continue
+			}
+			clean[k] = v
+		}
+		out = append(out, state.DNSRule{
+			Kind:    state.DNSRuleKindUser,
+			Enabled: true,
+			Body:    clean,
+		})
+	}
+	return out
+}
+
+// DNSRuleOrderFromStateRules — обратная конверсия: из state.DNS.Rules
+// восстанавливает model.DNSRuleOrder + populates user rules into a slice
+// returned alongside (caller must assign to model.DNSUserRules).
+//
+// Параметры:
+//   - rules — state.DNS.Rules
+//   - presetRefs — already restored model.PresetRefs (для маппинга kind=preset ref→Index)
+//
+// Возвращает:
+//   - order — slots in same order as rules slice
+//   - userRules — kind=user entries в том же порядке, что в rules (slot.Index
+//     ссылается в этот slice)
+//
+// Если rules пустой → возвращает (nil, nil); caller fallback'ается на
+// RebuildDNSRuleOrder.
+func DNSRuleOrderFromStateRules(
+	rules []state.DNSRule,
+	presetRefs []*PresetRefState,
+) (order []DNSRuleSlot, userRules []DNSUserRule) {
+	if len(rules) == 0 {
+		return nil, nil
+	}
+	prByRef := make(map[string]int, len(presetRefs))
+	for i, pr := range presetRefs {
+		if pr != nil && pr.Ref != "" {
+			prByRef[pr.Ref] = i
+		}
+	}
+	order = make([]DNSRuleSlot, 0, len(rules))
+	userRules = make([]DNSUserRule, 0)
+	for _, r := range rules {
+		switch r.Kind {
+		case state.DNSRuleKindPreset:
+			if idx, ok := prByRef[r.Ref]; ok {
+				order = append(order, DNSRuleSlot{Kind: DNSSlotKindPresetRef, Index: idx})
+			}
+			// Если preset-ref не найден в presetRefs (broken) — slot
+			// просто не появится; ReconcileDNSRuleOrder ничего не добавит
+			// (нет лишних preset-ref'ов).
+		case state.DNSRuleKindUser:
+			body := make(map[string]interface{}, len(r.Body))
+			for k, v := range r.Body {
+				switch k {
+				case "kind", "ref", "enabled":
+					continue
+				}
+				body[k] = v
+			}
+			newIdx := len(userRules)
+			userRules = append(userRules, DNSUserRule{
+				Enabled: r.Enabled,
+				Body:    body,
+			})
+			order = append(order, DNSRuleSlot{Kind: DNSSlotKindUser, Index: newIdx})
+		}
+	}
+	return order, userRules
 }
 
 // indexColon — мелкий helper: позиция первого ':' или -1.
