@@ -148,13 +148,16 @@ func BuildRulesAndDNS(
 				continue
 			}
 			sb := body.(*corestate.SrsBody)
-			path, hasCache := srsCachedPaths[rule.ID]
+			// SPEC 063: identity = StableRuleID; key map'а CollectSrsCachedPaths
+			// и tag в sing-box обязаны совпадать — оба берутся отсюда.
+			id := corestate.StableRuleID(rule)
+			path, hasCache := srsCachedPaths[id]
 			if !hasCache {
 				result.Warnings = append(result.Warnings,
 					fmt.Sprintf("srs rule %q skipped: no cached file at <execDir>/bin/rule-sets/", sb.Name))
 				continue
 			}
-			tag := "user:" + rule.ID
+			tag := "user:" + id
 			rs := map[string]interface{}{
 				"tag":    tag,
 				"type":   "local",

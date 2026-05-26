@@ -73,7 +73,7 @@ func TestStateFullNotFound(t *testing.T) {
 func TestStateRulesGet(t *testing.T) {
 	st := state.New()
 	st.Rules = []state.Rule{
-		{Kind: state.RuleKindInline, ID: "01J", Enabled: true, Body: json.RawMessage(`{"name":"x","match":{},"outbound":"direct-out"}`)},
+		{Kind: state.RuleKindInline, Enabled: true, Body: json.RawMessage(`{"name":"x","match":{"port":[443]},"outbound":"direct-out"}`)},
 	}
 	ff := &fakeFacade{stateValue: st}
 	base, _ := newTestServer(t, ff)
@@ -116,7 +116,7 @@ func TestStateRulesPatch(t *testing.T) {
 			name: "append_inline",
 			mode: "append",
 			rules: []state.Rule{
-				{Kind: state.RuleKindInline, ID: "01K", Enabled: true, Body: json.RawMessage(`{"name":"a","match":{},"outbound":"direct-out"}`)},
+				{Kind: state.RuleKindInline, Enabled: true, Body: json.RawMessage(`{"name":"a","match":{"port":[443]},"outbound":"direct-out"}`)},
 			},
 			wantStatus: 200,
 			wantCount:  2, // initial state has 1 below
@@ -143,7 +143,7 @@ func TestStateRulesPatch(t *testing.T) {
 			// 2 = 1 + 1 outcome.
 			init := state.New()
 			init.Rules = []state.Rule{
-				{Kind: state.RuleKindInline, ID: "01J", Enabled: true, Body: json.RawMessage(`{"name":"existing","match":{},"outbound":"direct-out"}`)},
+				{Kind: state.RuleKindInline, Enabled: true, Body: json.RawMessage(`{"name":"existing","match":{"port":[443]},"outbound":"direct-out"}`)},
 			}
 			ff := &fakeFacade{stateValue: init}
 			base, _ := newTestServer(t, ff)

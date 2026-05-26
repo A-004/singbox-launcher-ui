@@ -230,7 +230,8 @@ func TestHasAnyPresetRef(t *testing.T) {
 	if hasAnyPresetRef(nil) {
 		t.Error("nil should be false")
 	}
-	if hasAnyPresetRef([]state.Rule{{Kind: state.RuleKindInline, ID: "x", Enabled: true}}) {
+	if hasAnyPresetRef([]state.Rule{{Kind: state.RuleKindInline, Enabled: true,
+		Body: json.RawMessage(`{"name":"x","match":{"port":[443]},"outbound":"direct-out"}`)}}) {
 		t.Error("inline should not count")
 	}
 	if hasAnyPresetRef([]state.Rule{{Kind: state.RuleKindPreset, Ref: "x", Enabled: false}}) {

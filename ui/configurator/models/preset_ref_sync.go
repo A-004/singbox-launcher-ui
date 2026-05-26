@@ -122,15 +122,13 @@ func RuleOrderFromStateRulesV6(rules []state.Rule, presetRefs []*PresetRefState,
 			prByRef[pr.Ref] = i
 		}
 	}
-	crByID := make(map[string]int, len(customRules))
+	// SPEC 063: identity для kind=inline/srs = state.StableRuleID(r), которая
+	// для legacy RuleState равна sanitize(rs.Rule.Label) (body.name берётся
+	// из Label при конверсии). Совпадение по identity → совпадение по label.
 	crByLabel := make(map[string]int, len(customRules))
 	for i, cr := range customRules {
 		if cr == nil {
 			continue
-		}
-		id := stableRuleID(cr)
-		if id != "" {
-			crByID[id] = i
 		}
 		if cr.Rule.Label != "" {
 			crByLabel[cr.Rule.Label] = i
@@ -145,13 +143,7 @@ func RuleOrderFromStateRulesV6(rules []state.Rule, presetRefs []*PresetRefState,
 				out = append(out, RuleSlot{Kind: SlotKindPresetRef, Index: idx})
 			}
 		case state.RuleKindInline, state.RuleKindSrs:
-			if r.ID != "" {
-				if idx, ok := crByID[r.ID]; ok {
-					out = append(out, RuleSlot{Kind: SlotKindCustom, Index: idx})
-					continue
-				}
-			}
-			// Fallback по label из decoded body.
+			// Lookup по body.name (=label) — единственная точка истины с SPEC 063.
 			if body, err := r.DecodeBody(); err == nil {
 				var name string
 				switch b := body.(type) {
@@ -172,6 +164,14 @@ func RuleOrderFromStateRulesV6(rules []state.Rule, presetRefs []*PresetRefState,
 }
 
 // customRuleStateToV6Rule — конверсия RuleState (legacy) → state.Rule (kind=inline|srs).
+//
+// SPEC 063: identity не stored, вычисляется из body.name. Body.Name = rs.Rule.Label —
+// то же, что прежний `stableRuleID` использовал как seed. Так что identity (=
+// state.StableRuleID для нового state.Rule) семантически совпадает со старым
+// `"rule-" + sanitize(label)` в плане «стабильна между save'ами для того же
+// правила». Точное строковое представление поменялось — старый префикс
+// "rule-" удалён — но это безопасно: identity больше нигде не сохраняется
+// и не используется как filename (filename теперь URL-derived, см. issue #77).
 func customRuleStateToV6Rule(rs *RuleState) *state.Rule {
 	if rs == nil {
 		return nil
@@ -192,10 +192,8 @@ func customRuleStateToV6Rule(rs *RuleState) *state.Rule {
 					SrsURL:   probe.URL,
 					Outbound: outbound,
 				})
-				id := stableRuleID(rs)
 				return &state.Rule{
 					Kind:    state.RuleKindSrs,
-					ID:      id,
 					Enabled: rs.Enabled,
 					Body:    body,
 				}
@@ -213,39 +211,11 @@ func customRuleStateToV6Rule(rs *RuleState) *state.Rule {
 		Match:    match,
 		Outbound: outbound,
 	})
-	id := stableRuleID(rs)
 	return &state.Rule{
 		Kind:    state.RuleKindInline,
-		ID:      id,
 		Enabled: rs.Enabled,
 		Body:    body,
 	}
-}
-
-// stableRuleID — generate ID based on label hash if not already set.
-// Используется при первой конверсии legacy → v6 (после этого ID становится частью save state).
-func stableRuleID(rs *RuleState) string {
-	// Используем label + outbound как сид — стабильно между save'ами для того же правила.
-	// Для production требуется ULID; здесь упрощённо — hash от label достаточен.
-	if rs.Rule.Label == "" {
-		return "rule-unnamed"
-	}
-	return "rule-" + sanitizeIDPart(rs.Rule.Label)
-}
-
-func sanitizeIDPart(s string) string {
-	out := make([]byte, 0, len(s))
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			out = append(out, byte(r))
-		} else if r == ' ' {
-			out = append(out, '-')
-		}
-	}
-	if len(out) == 0 {
-		return "rule"
-	}
-	return string(out)
 }
 
 func stripOutboundAction(rule map[string]interface{}) map[string]interface{} {

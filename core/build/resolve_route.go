@@ -226,7 +226,7 @@ func resolveInlineRouteRule(out *ResolvedRoute, rule corestate.Rule) {
 	out.Rules = append(out.Rules, ResolvedRouteRule{
 		Body:     routeRule,
 		Source:   RouteSourceInline,
-		InlineID: rule.ID,
+		InlineID: corestate.StableRuleID(rule),
 		Active:   true,
 		Enabled:  rule.Enabled,
 	})
@@ -245,13 +245,14 @@ func resolveSrsRouteRule(
 		return
 	}
 	sb := body.(*corestate.SrsBody)
-	path, hasCache := srsCachedPaths[rule.ID]
-	tag := "user:" + rule.ID
+	id := corestate.StableRuleID(rule)
+	path, hasCache := srsCachedPaths[id]
+	tag := "user:" + id
 	if !hasCache {
 		out.RuleSets = append(out.RuleSets, ResolvedRouteRuleSet{
 			Tag:           tag,
 			Source:        RouteSourceSrs,
-			SrsID:         rule.ID,
+			SrsID:         id,
 			Skipped:       true,
 			SkippedReason: "srs file not cached",
 		})
@@ -269,7 +270,7 @@ func resolveSrsRouteRule(
 			Tag:    tag,
 			Body:   rs,
 			Source: RouteSourceSrs,
-			SrsID:  rule.ID,
+			SrsID:  id,
 		})
 		emittedTags[tag] = true
 	}
@@ -278,7 +279,7 @@ func resolveSrsRouteRule(
 	out.Rules = append(out.Rules, ResolvedRouteRule{
 		Body:    routeRule,
 		Source:  RouteSourceSrs,
-		SrsID:   rule.ID,
+		SrsID:   id,
 		Active:  true,
 		Enabled: rule.Enabled,
 	})

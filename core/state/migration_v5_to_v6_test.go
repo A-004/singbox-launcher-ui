@@ -67,8 +67,9 @@ func TestMigrate_CustomRule_Inline(t *testing.T) {
 	if r.Kind != RuleKindInline {
 		t.Errorf("kind: %q want inline", r.Kind)
 	}
-	if r.ID == "" {
-		t.Error("ID should be generated for inline")
+	// SPEC 063: identity вычисляется из body.name = CustomRule.Label.
+	if got := StableRuleID(r); got != "Firefox--VPN" {
+		t.Errorf("StableRuleID: %q (want sanitize of Label)", got)
 	}
 	if r.Ref != "" {
 		t.Errorf("Ref should be empty for inline: %q", r.Ref)
@@ -155,8 +156,9 @@ func TestMigrate_CustomRule_PresetMatch(t *testing.T) {
 	if r.Kind != RuleKindPreset || r.Ref != "ru-direct" {
 		t.Errorf("expected preset-ref to ru-direct: %+v", r)
 	}
-	if r.ID != "" {
-		t.Errorf("preset-ref should not have ID: %q", r.ID)
+	// SPEC 063: identity для kind=preset = Ref.
+	if got := StableRuleID(r); got != "ru-direct" {
+		t.Errorf("preset identity should equal Ref, got %q", got)
 	}
 }
 

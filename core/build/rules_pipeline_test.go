@@ -18,12 +18,17 @@ func makeTestPreset(t *testing.T, raw string) template.Preset {
 	return p
 }
 
-func makeTestRule(t *testing.T, kind state.RuleKind, ref, id string, enabled bool, bodyJSON string) state.Rule {
+// makeTestRule — test helper.
+//
+// SPEC 063: параметр `id` сохранён в сигнатуре для backward-compat с
+// существующими call'ами (тестов слишком много чтобы переписать сразу) — но
+// в state.Rule больше не пишется. Identity вычисляется через StableRuleID
+// из body.name.
+func makeTestRule(t *testing.T, kind state.RuleKind, ref, _ string, enabled bool, bodyJSON string) state.Rule {
 	t.Helper()
 	return state.Rule{
 		Kind:    kind,
 		Ref:     ref,
-		ID:      id,
 		Enabled: enabled,
 		Body:    json.RawMessage(bodyJSON),
 	}
@@ -214,15 +219,16 @@ func TestPipeline_UserSrs_WithCache(t *testing.T) {
 			"outbound": "reject"
 		}`)},
 	}
+	// SPEC 063: cache map keyed по StableRuleID = sanitize(body.name).
 	cached := map[string]string{
-		"01JSRS1": "/tmp/rule-sets/01JSRS1.srs",
+		"Block-list": "/tmp/rule-sets/Block-list.srs",
 	}
 	result := BuildRulesAndDNS(nil, nil, state, cached)
 	if len(result.RouteRuleSet) != 1 {
 		t.Fatalf("rule_set count: %d", len(result.RouteRuleSet))
 	}
 	rs := result.RouteRuleSet[0]
-	if rs["type"] != "local" || rs["path"] != "/tmp/rule-sets/01JSRS1.srs" {
+	if rs["type"] != "local" || rs["path"] != "/tmp/rule-sets/Block-list.srs" {
 		t.Errorf("srs rule_set: %+v", rs)
 	}
 }
@@ -274,7 +280,8 @@ func TestPipeline_MixedKinds(t *testing.T) {
 			}`),
 		},
 	}
-	srsCache := map[string]string{"01JSR1": "/path/to/y.srs"}
+	// SPEC 063: cache map keyed по StableRuleID = sanitize(body.name) = "Y".
+	srsCache := map[string]string{"Y": "/path/to/y.srs"}
 	result := BuildRulesAndDNS(presets, nil, state, srsCache)
 
 	if len(result.RouteRules) != 3 {

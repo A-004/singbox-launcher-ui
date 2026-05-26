@@ -202,7 +202,8 @@ func TestRoundTrip_V6_LoadSaveLoad(t *testing.T) {
 	original.Rules = []Rule{
 		{Kind: RuleKindPreset, Ref: "ru-direct", Enabled: true,
 			Body: json.RawMessage(`{"vars":{"dns_ip":"77.88.8.7"}}`)},
-		{Kind: RuleKindInline, ID: "u1", Enabled: true,
+		// SPEC 063: identity для inline = sanitize(body.name). Поле Rule.ID удалено.
+		{Kind: RuleKindInline, Enabled: true,
 			Body: json.RawMessage(`{"name":"X","match":{"port":[443]},"outbound":"proxy-out"}`)},
 	}
 	original.DNS = DNSOptions{
@@ -279,5 +280,39 @@ func TestParseV6_LegacyInlineConversion(t *testing.T) {
 	}
 	if cr.Rule["outbound"] != "proxy-out" {
 		t.Error("Rule.outbound should be set for build pipeline")
+	}
+}
+
+// TestParseV6_LegacySRSConversion — SPEC 063 follow-up: kind=srs в v6 →
+// legacy CustomRule с Type=srs И rule_set placeholder в Rule (для
+// DetermineRuleType, иначе edit dialog показывает Custom JSON).
+func TestParseV6_LegacySRSConversion(t *testing.T) {
+	raw := []byte(`{
+		"meta": {"version": 6, "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"},
+		"connections": {"sources": [], "outbounds": [], "defaults": {}},
+		"rules": [{"kind": "srs", "enabled": true, "body": {
+			"name": "YT",
+			"srs_url": "https://example.com/list.srs",
+			"outbound": "direct-out"
+		}}],
+		"dns": {}
+	}`)
+	s, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(s.CustomRules) != 1 {
+		t.Fatalf("expected 1 CustomRule, got %d", len(s.CustomRules))
+	}
+	cr := s.CustomRules[0]
+	if cr.Type != RuleTypeSRS {
+		t.Errorf("Type: %q want srs", cr.Type)
+	}
+	// rule_set ключ обязан быть в Rule — иначе DetermineRuleType вернёт raw.
+	if _, has := cr.Rule["rule_set"]; !has {
+		t.Errorf("Rule must contain rule_set hint for SRS detection: %+v", cr.Rule)
+	}
+	if len(cr.RuleSet) != 1 {
+		t.Errorf("RuleSet count: %d", len(cr.RuleSet))
 	}
 }

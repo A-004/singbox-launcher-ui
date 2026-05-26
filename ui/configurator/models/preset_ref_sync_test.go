@@ -42,8 +42,9 @@ func TestSyncAllRulesToStateRulesV6_InlineFromCustomRule(t *testing.T) {
 	if r.Kind != state.RuleKindInline {
 		t.Errorf("kind: %q", r.Kind)
 	}
-	if r.ID == "" {
-		t.Error("ID should be generated")
+	// SPEC 063: identity вычислима через StableRuleID; ID-поля в struct больше нет.
+	if got := state.StableRuleID(r); got != "Firefox-VPN" {
+		t.Errorf("StableRuleID: %q (want sanitize of label)", got)
 	}
 	body, err := r.DecodeBody()
 	if err != nil {
@@ -179,18 +180,30 @@ func TestSyncDNSFullToStateV6_RulesText(t *testing.T) {
 	}
 }
 
-// TestStableRuleID_Sanitize — sanity для генератора ID.
-func TestStableRuleID_Sanitize(t *testing.T) {
+// TestStableRuleID_FromLegacyRuleState — SPEC 063: identity конвертированного
+// legacy RuleState вычислима через `state.StableRuleID` от resulting state.Rule.
+// Прежняя локальная `stableRuleID` (с префиксом "rule-") удалена; identity
+// теперь чистая sanitize(body.name).
+func TestStableRuleID_FromLegacyRuleState(t *testing.T) {
 	cases := map[string]string{
-		"Hello World":            "rule-Hello-World",
-		"Firefox через VPN":      "rule-Firefox--VPN", // не-ASCII strip'нуто
-		"":                       "rule-unnamed",
-		"name with !@# symbols!": "rule-name-with--symbols",
+		"Hello World":            "Hello-World",
+		"Firefox через VPN":      "Firefox--VPN", // не-ASCII strip'нуто
+		"name with !@# symbols!": "name-with--symbols",
 	}
 	for label, want := range cases {
-		rs := &RuleState{Rule: wizardtemplate.TemplateSelectableRule{Label: label}}
-		if got := stableRuleID(rs); got != want {
-			t.Errorf("label %q: got %q want %q", label, got, want)
+		rs := &RuleState{
+			Rule: wizardtemplate.TemplateSelectableRule{
+				Label: label,
+				Rule:  map[string]interface{}{"port": []interface{}{443}},
+			},
+			SelectedOutbound: "direct-out",
+		}
+		r := customRuleStateToV6Rule(rs)
+		if r == nil {
+			t.Fatalf("label %q: conversion returned nil", label)
+		}
+		if got := state.StableRuleID(*r); got != want {
+			t.Errorf("label %q: StableRuleID got %q want %q", label, got, want)
 		}
 	}
 }

@@ -26,17 +26,22 @@ const (
 // Rule — единица в state.rules[] с header/body разделением.
 //
 // Header содержит только то что общее для всех kind'ов: discriminator,
-// identifier (Ref для preset / ID для user) и enabled toggle. Kind-specific
+// ref (для kind=preset — lookup в template) и enabled toggle. Kind-specific
 // payload — в Body, парсится по dispatcher'у через DecodeBody.
+//
+// **SPEC 063:** поле `ID` УДАЛЕНО — было pure redundancy с body.name.
+// Identity правила теперь чистая функция: см. `StableRuleID(r)` в
+// `rule_identity.go`. Legacy state.json с `"id":"rule-X"` загружается
+// без ошибки (Go JSON unmarshal silently игнорирует unknown fields);
+// на следующем Save поле не эмитится.
 //
 // Сериализация:
 //
 //	{
 //	  "kind":     "preset" | "inline" | "srs",
-//	  "ref":      "<preset_id>",  // только для kind=preset
-//	  "id":       "<ulid>",       // только для kind=inline | srs
+//	  "ref":      "<preset_id>",   // только для kind=preset
 //	  "enabled":  true | false,
-//	  "body":     { ... }         // kind-specific
+//	  "body":     { ... }          // kind-specific; body.name = identity source
 //	}
 type Rule struct {
 	// Kind — discriminator. Required.
@@ -44,9 +49,6 @@ type Rule struct {
 
 	// Ref — ссылка на template.presets[].id. Required для kind=preset, иначе пуст.
 	Ref string `json:"ref,omitempty"`
-
-	// ID — ULID. Required для kind=inline|srs, иначе пуст.
-	ID string `json:"id,omitempty"`
 
 	// Enabled — общий toggle.
 	Enabled bool `json:"enabled"`
@@ -86,18 +88,22 @@ type SrsBody struct {
 // DecodeBody парсит Rule.Body в kind-specific тип.
 // Возвращает один из {*PresetBody, *InlineBody, *SrsBody}.
 //
+// Валидация по kind (SPEC 063):
+//
+//	preset → r.Ref required, r.Body optional
+//	inline → r.Ref empty,    body.Name required
+//	srs    → r.Ref empty,    body.Name + body.SrsURL required
+//
 // Ошибки:
-//   - kind=preset без ref / inline|srs без id — semantic error
-//   - kind unknown — error
-//   - JSON unmarshal failed — error
+//   - kind=preset без ref → semantic error
+//   - kind=inline/srs с ref / без body.Name (srs ещё без SrsURL) → semantic error
+//   - kind unknown → error
+//   - JSON unmarshal failed → error
 func (r *Rule) DecodeBody() (interface{}, error) {
 	switch r.Kind {
 	case RuleKindPreset:
 		if r.Ref == "" {
 			return nil, fmt.Errorf("rule kind=preset requires ref")
-		}
-		if r.ID != "" {
-			return nil, fmt.Errorf("rule kind=preset must not have id (use ref)")
 		}
 		var body PresetBody
 		if len(r.Body) > 0 {
@@ -111,28 +117,31 @@ func (r *Rule) DecodeBody() (interface{}, error) {
 		return &body, nil
 
 	case RuleKindInline:
-		if r.ID == "" {
-			return nil, fmt.Errorf("rule kind=inline requires id")
-		}
 		if r.Ref != "" {
-			return nil, fmt.Errorf("rule kind=inline must not have ref (use id)")
+			return nil, fmt.Errorf("rule kind=inline must not have ref")
 		}
 		var body InlineBody
 		if err := json.Unmarshal(r.Body, &body); err != nil {
 			return nil, fmt.Errorf("decode inline body: %w", err)
 		}
+		if body.Name == "" {
+			return nil, fmt.Errorf("rule kind=inline requires body.name")
+		}
 		return &body, nil
 
 	case RuleKindSrs:
-		if r.ID == "" {
-			return nil, fmt.Errorf("rule kind=srs requires id")
-		}
 		if r.Ref != "" {
-			return nil, fmt.Errorf("rule kind=srs must not have ref (use id)")
+			return nil, fmt.Errorf("rule kind=srs must not have ref")
 		}
 		var body SrsBody
 		if err := json.Unmarshal(r.Body, &body); err != nil {
 			return nil, fmt.Errorf("decode srs body: %w", err)
+		}
+		if body.Name == "" {
+			return nil, fmt.Errorf("rule kind=srs requires body.name")
+		}
+		if body.SrsURL == "" {
+			return nil, fmt.Errorf("rule kind=srs requires body.srs_url")
 		}
 		return &body, nil
 

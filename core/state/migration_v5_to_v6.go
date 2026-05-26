@@ -100,9 +100,10 @@ func migrateCustomRule(
 				SrsURL:   rs.URL,
 				Outbound: cr.SelectedOutbound,
 			})
+			// SPEC 063: identity берётся через StableRuleID (= sanitize(body.name));
+			// поле Rule.ID удалено — больше не stored.
 			return &Rule{
 				Kind:    RuleKindSrs,
-				ID:      generateMigrationULID(),
 				Enabled: cr.Enabled,
 				Body:    body,
 			}, nil
@@ -123,9 +124,9 @@ func migrateCustomRule(
 		Match:    match,
 		Outbound: cr.SelectedOutbound,
 	})
+	// SPEC 063: identity = StableRuleID(r) = sanitize(body.name).
 	return &Rule{
 		Kind:    RuleKindInline,
-		ID:      generateMigrationULID(),
 		Enabled: cr.Enabled,
 		Body:    body,
 	}, nil
@@ -230,16 +231,9 @@ func migrateDNS(old *LegacyDNSOptionsV5, templateDefaults map[string]bool) (DNSO
 	return d, nil
 }
 
-// generateMigrationULID — placeholder для миграции v5→v6. Используется только
-// внутри migration helpers; для UI/runtime используется MakeULID (полноценный
-// ULID). Простой timestamp + counter — достаточно для миграции (она одноразовая).
-func generateMigrationULID() string {
-	now := time.Now().UnixNano()
-	migrationCounter++
-	return fmt.Sprintf("01J%X%X", now, migrationCounter)
-}
-
-var migrationCounter uint64
+// generateMigrationULID УДАЛЁН (SPEC 063): identity больше не stored в
+// state.Rule.ID — он вычислим из body.name через StableRuleID. Миграция v5→v6
+// просто переносит CustomRule.Label → body.name; identity получает caller.
 
 // isV6 — детект schema version по сырому state JSON.
 func isV6(raw []byte) bool {

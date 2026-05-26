@@ -459,13 +459,22 @@ func cleanDanglingDNSRule(rule map[string]interface{}, validTags map[string]bool
 	return out
 }
 
-// CollectSrsCachedPaths — собирает map[user-rule-id]→абсолютный путь к скачанному
+// CollectSrsCachedPaths — собирает map[StableRuleID]→абсолютный путь к скачанному
 // .srs файлу для всех kind=srs правил в state.Rules.
 //
-// Каждый kind=srs rule имеет user ID; .srs файл лежит в <execDir>/bin/rule-sets/
-// под content-addressed tag'ом (см. SPEC 020 / dialogs/srs_tag.go).
-// Если файл отсутствует — entry для этого ID НЕ добавляется (build pipeline
-// получит "no cached file" warning и skip'нет правило).
+// Key map'а = `state.StableRuleID(r)` (identity правила, вычисляется на лету
+// из body.name; см. SPEC 063). Value = filesystem path к файлу, имя которого
+// выводится из SrsBody.SrsURL через srsTagFromURLLocal (тот же алгоритм, что
+// и для preset SRS файлов — `<basename>-<sha256(url)[:8]>`). Единственный
+// источник правды о filename'е во всех 3 местах: downloader → этот map →
+// orphan GC.
+//
+// Issue #77: ранее использовали `<r.ID>.srs` как filename, но downloader
+// сохраняет под URL-derived tag — mismatch. Теперь оба пути сходятся, и
+// дополнительно 2 правила на одинаковый URL шарят один файл (дедуп).
+//
+// Если SrsBody не декодится или SrsURL пустой — entry НЕ добавляется
+// (rules_pipeline получит "no cached file" warning и skip'нет правило).
 //
 // Для preset-ref'ов с remote rule_set'ами SRS-кэш не нужен: ExpandPreset
 // эмитит rule_set с type=remote URL, а sing-box сам качает. Но если хотим
@@ -476,14 +485,19 @@ func CollectSrsCachedPaths(rules []state.Rule, execDir string) map[string]string
 	}
 	out := make(map[string]string, len(rules))
 	for _, r := range rules {
-		if r.Kind != state.RuleKindSrs || r.ID == "" {
+		if r.Kind != state.RuleKindSrs {
 			continue
 		}
-		// Convention: user-defined srs rule cached as bin/rule-sets/<id>.srs.
-		// Это упрощение — production использует content-addressed tag scheme.
-		// Сейчас просто ставим path; если файла нет — MergePresetsIntoRoute
-		// напишет warning и skip'нет.
-		out[r.ID] = execDir + "/bin/rule-sets/" + r.ID + ".srs"
+		body, err := r.DecodeBody()
+		if err != nil {
+			continue
+		}
+		sb, ok := body.(*state.SrsBody)
+		if !ok || sb.SrsURL == "" {
+			continue
+		}
+		tag := srsTagFromURLLocal(sb.SrsURL)
+		out[state.StableRuleID(r)] = execDir + "/bin/rule-sets/" + tag + ".srs"
 	}
 	return out
 }
