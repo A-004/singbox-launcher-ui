@@ -58,7 +58,7 @@ const (
 // bumped per release as a deliberate engineering decision; the source-of-
 // truth lives here, not in auto-discovered GitHub latest. See
 // docs/RELEASE_PROCESS.md §5.1.
-const RequiredCoreVersion = "1.13.11"
+const RequiredCoreVersion = "1.13.12"
 
 // AppVersion — git describe output. Set by build scripts via -ldflags.
 //

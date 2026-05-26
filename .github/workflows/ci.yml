@@ -501,10 +501,23 @@ jobs:
             objdump -f rsrc.syso || true
           fi
 
+          # RequiredTemplateRef pinned to commit being built — see SPEC 046.
+          # Mirrors the resolution done in build/build_windows.bat for parity
+          # with the modern Windows build.
+          TEMPLATE_REF=$(git rev-parse HEAD)
+          if [ -z "$TEMPLATE_REF" ]; then
+            echo "Could not resolve git HEAD for RequiredTemplateRef; aborting"
+            exit 1
+          fi
+          echo "Template ref: $TEMPLATE_REF"
+          echo "App version:  $APP_VERSION"
+
           go build -modfile=go.win7.mod -v \
             -tags desktop \
             -trimpath \
-            -ldflags "-s -w -H windowsgui -X main.Version=$APP_VERSION" \
+            -ldflags "-s -w -H windowsgui \
+              -X singbox-launcher/internal/constants.AppVersion=$APP_VERSION \
+              -X singbox-launcher/internal/constants.RequiredTemplateRef=$TEMPLATE_REF" \
             -o dist/singbox-launcher-win7-32.exe .
 
           ls -lh dist/singbox-launcher-win7-32.exe
