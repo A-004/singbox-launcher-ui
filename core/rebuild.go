@@ -33,6 +33,7 @@ func validateConfigViaSingBox(singboxPath, configPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, singboxPath, "check", "-c", configPath)
+	platform.PrepareCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return nil

@@ -74,11 +74,20 @@ func SendCtrlBreak(pid int) error {
 	return nil
 }
 
-// PrepareCommand prepares a command with platform-specific attributes
+// PrepareCommand prepares a command with platform-specific attributes.
+//
+// HideWindow only — CREATE_NO_WINDOW kept commented intentionally.
+// GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) used by SendCtrlBreak
+// for graceful sing-box shutdown requires the child to have a console;
+// CREATE_NO_WINDOW suppresses console allocation and silently no-ops
+// CTRL+BREAK, collapsing the 2-second graceful window into immediate
+// force-kill. The cosmetic cmd-window flash on short-lived spawns
+// (sing-box check, wmic, taskkill) is accepted in exchange for proper
+// shutdown semantics on the long-lived sing-box run process.
 func PrepareCommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow: true,
-		//	CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+		//	CreationFlags: 0x08000000, // CREATE_NO_WINDOW — see comment above
 	}
 }
 

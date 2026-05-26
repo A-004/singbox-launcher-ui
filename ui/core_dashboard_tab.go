@@ -131,7 +131,9 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 
 	// SPEC 052 phase 8 polish: subscription status panel под Exit'ом —
 	// log потока операции + finалный toast (×, ✓/✗, auto-hide 20s).
-	contentItems = append(contentItems, widget.NewSeparator())
+	// Сепаратор перед панелью убран: панель сама невидима пока нет
+	// активной операции, и торчащая горизонтальная линия после Exit
+	// в idle-состоянии выглядела как visual noise.
 	contentItems = append(contentItems, tab.createSubsStatusBlock())
 
 	content := container.NewVBox(contentItems...)

@@ -56,6 +56,7 @@ func loadDeviceInfo() {
 func wmicValue(alias, property string) string {
 	var stdout bytes.Buffer
 	cmd := exec.Command("wmic", alias, "get", property, "/value")
+	PrepareCommand(cmd)
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
 		return ""
