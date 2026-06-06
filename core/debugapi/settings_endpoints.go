@@ -36,7 +36,7 @@ import (
 //
 //	{
 //	  "user_agent": "v2rayN/7.5.0",                         // raw stored value (may be empty)
-//	  "default":    "singbox-launcher/0.9.8.1 (macOS arm64)", // what gets sent when user_agent is empty
+//	  "default":    "singbox-launcher/0.9.9 (macOS arm64)",   // what gets sent when user_agent is empty
 //	  "effective":  "v2rayN/7.5.0"                          // what the next fetch will actually send
 //	}
 //

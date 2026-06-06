@@ -18,7 +18,7 @@ export API="http://127.0.0.1:9263"
 # 4. Проверить
 curl -s "$API/ping"                                    # → {"ok":true}    (без auth)
 curl -s -H "Authorization: Bearer $TOKEN" "$API/version"
-# → {"launcher":"v0.9.8.1","singbox":"1.13.12","api":"debugapi/v1"}
+# → {"launcher":"v0.9.9","singbox":"1.13.12","api":"debugapi/v1"}
 ```
 
 ---
@@ -212,7 +212,7 @@ Response shape:
 ```json
 {
   "captured_at": "2026-05-28T12:00:00Z",
-  "launcher_version": "v0.9.8.1",
+  "launcher_version": "v0.9.9",
   "singbox_version": "1.13.12",
   "files": { "state.json": "...", "config.json": "...", "wizard_template.json": "..." },
   "missing": [],
