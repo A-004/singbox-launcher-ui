@@ -408,15 +408,15 @@ Legacy `dns_options` scalar keys (`strategy`, `final`, `default_domain_resolver`
 
 **DNS tab uses `vars` (`dns_*`) now:** Wizard DNS scalars are template vars and use `@dns_*` substitution in `config`. `dns_options` remains only for `servers` / `rules`. See **`docs/WIZARD_STATE.md`** and **`SPECS/032-F-C-WIZARD_SETTINGS_TAB/SUB_SPEC_DNS_TAB_VARS.md`**.
 
-**`params.if`:** Optional array of **boolean** variable names, e.g. `"if": ["tun"]`. The param is applied only if **every** listed variable is true **on the current OS** (see **`vars[].platforms`**: if the var is scoped to other platforms, it counts as false here).
+**`params.if`:** Optional array of **boolean** variable names, e.g. `"if": ["@tun"]`. Each element **must** start with `@` (loader error otherwise — see SPEC 067). The param is applied only if **every** listed variable is true **on the current OS** (see **`vars[].platforms`**: if the var is scoped to other platforms, it counts as false here).
 
-**`params.if_or`:** Optional array of boolean variable names, e.g. `"if_or": ["tun_builtin", "tun"]`. The param is applied if **at least one** listed variable is true on the current OS. **`if`** and **`if_or`** cannot be set on the same param.
+**`params.if_or`:** Optional array of boolean variable names, e.g. `"if_or": ["@tun_builtin", "@tun"]`. The param is applied if **at least one** listed variable is true on the current OS. **`if`** and **`if_or`** cannot be set on the same param.
 
-**How `vars[].platforms` interacts with `if` / `if_or`:** For each name in **`if`** or **`if_or`**, the launcher checks whether that variable **applies to the current OS** (empty **`platforms`** → all OSes; otherwise **`runtime.GOOS`** must appear in the list). The legacy Win7 launcher binary is **`windows`** with **`386`** — use **`"windows"`** in **`params` / `selectable_rules`**, not a separate **`win7`** tag in **`platforms`**. The stock **`tun_stack`** var uses **`default_value`** as a JSON object, e.g. **`{"win7":"gvisor","default":"system"}`**, so unset stack defaults to **`gvisor`** on that build and **`system`** elsewhere (see **`VarDefaultValue`** in **`ui/wizard/template/vars_default.go`**). If the variable does **not** apply, it contributes **`false`** to the AND/OR — **before** reading the resolved value from wizard state. A saved **`"true"`** in **`state.vars`** for e.g. **`tun`** does **not** make **`if: ["tun"]`** pass on Linux if **`tun`** is **`darwin`**-only in the template. (Implementation: **`VarAppliesOnGOOS`** / **`ParamBoolVarTrue`** in **`ui/wizard/template/vars_resolve.go`**.)
+**How `vars[].platforms` interacts with `if` / `if_or`:** For each name in **`if`** or **`if_or`**, strip the leading `@` and look up the var; the launcher checks whether that variable **applies to the current OS** (empty **`platforms`** → all OSes; otherwise **`runtime.GOOS`** must appear in the list). The legacy Win7 launcher binary is **`windows`** with **`386`** — use **`"windows"`** in **`params` / `selectable_rules`**, not a separate **`win7`** tag in **`platforms`**. The stock **`tun_stack`** var uses **`default_value`** as a JSON object, e.g. **`{"win7":"gvisor","default":"system"}`**, so unset stack defaults to **`gvisor`** on that build and **`system`** elsewhere (see **`VarDefaultValue`** in **`core/template/vars_default.go`**). If the variable does **not** apply, it contributes **`false`** to the AND/OR — **before** reading the resolved value from wizard state. A saved **`"true"`** in **`state.vars`** for e.g. **`tun`** does **not** make **`if: ["@tun"]`** pass on Linux if **`tun`** is **`darwin`**-only in the template. (Implementation: **`VarAppliesOnGOOS`** / **`ParamBoolVarTrue`** in **`core/template/vars_resolve.go`**.)
 
-The stock template uses **`"if": ["tun"]`** with **`"platforms": ["darwin"]`** for macOS TUN **inbounds**, and a single **`route.rules`** prepend with **`"if_or": ["tun_builtin", "tun"]`** and **`"platforms": ["windows", "linux", "darwin"]`**. Do not use the legacy label **`darwin-tun`** in **`platforms`**: it never equals **`runtime.GOOS`** on macOS (**`darwin`**). Use **`darwin`** with **`if`** / **`if_or`** for TUN-specific blocks.
+The stock template uses **`"if": ["@tun"]`** with **`"platforms": ["darwin"]`** for macOS TUN **inbounds**, and a single **`route.rules`** prepend with **`"if_or": ["@tun_builtin", "@tun"]`** and **`"platforms": ["windows", "linux", "darwin"]`**. Do not use the legacy label **`darwin-tun`** in **`platforms`**: it never equals **`runtime.GOOS`** on macOS (**`darwin`**). Use **`darwin`** with **`if`** / **`if_or`** for TUN-specific blocks.
 
-**Variable fields (in `vars` array):** `name` (recommended: `[A-Za-z_][A-Za-z0-9_]*` — enforced at load), `type` (`text`, `bool`, `enum`, `text_list`, `secret`), **`default_value`** (JSON string, number, boolean, or **object** of platform key → string — see **Platform keys for `default_value` objects** below), optional `default_node`, `options` (for `enum`), `platforms`, `wizard_ui` (`edit` / `view` read-only / `hidden` / `fix`), **`title`** (short row label on **Settings**; if omitted or blank, **`name`** is shown), **`tooltip`** (optional hover hint on supported widgets). Optional **`if`** / **`if_or`** (same semantics as **`params`**, mutually exclusive): on the **Settings** tab the row stays visible (subject to **`platforms`** / **`wizard_ui`**) but **controls are disabled** until the condition is met — e.g. TUN address/MTU with **`"if_or": ["tun_builtin", "tun"]`** until the platform-relevant TUN flag is on. Changing a bool var that others reference **refreshes** dependent rows. Type **`secret`** is reserved for the built-in pair **`name`: `clash_secret`**, **`type`: `secret`** (Clash API secret: behaves like `text` with a dedicated regenerate control). Use `text` / `enum` / `bool` / `text_list` for other variables. `wizard_ui: "fix"` means the variable is edited on a dedicated tab/flow (not Settings); `hidden` remains the generic "do not show on Settings" mode.
+**Variable fields (in `vars` array):** `name` (recommended: `[A-Za-z_][A-Za-z0-9_]*` — enforced at load), `type` (`text`, `bool`, `enum`, `text_list`, `secret`), **`default_value`** (JSON string, number, boolean, or **object** of platform key → string — see **Platform keys for `default_value` objects** below), optional `default_node`, `options` (for `enum`), `platforms`, `wizard_ui` (`edit` / `view` read-only / `hidden` / `fix`), **`title`** (short row label on **Settings**; if omitted or blank, **`name`** is shown), **`tooltip`** (optional hover hint on supported widgets). Optional **`if`** / **`if_or`** (same semantics as **`params`**, mutually exclusive): on the **Settings** tab the row stays visible (subject to **`platforms`** / **`wizard_ui`**) but **controls are disabled** until the condition is met — e.g. TUN address/MTU with **`"if_or": ["@tun_builtin", "@tun"]`** until the platform-relevant TUN flag is on. Changing a bool var that others reference **refreshes** dependent rows. Type **`secret`** is reserved for the built-in pair **`name`: `clash_secret`**, **`type`: `secret`** (Clash API secret: behaves like `text` with a dedicated regenerate control). Use `text` / `enum` / `bool` / `text_list` for other variables. `wizard_ui: "fix"` means the variable is edited on a dedicated tab/flow (not Settings); `hidden` remains the generic "do not show on Settings" mode.
 
 **Separator (layout only):** an entry **`{"separator": true}`** renders a horizontal rule on **Settings** between rows. Do **not** set **`name`**, **`type`**, **`default_value`**, **`default_node`**, **`options`**, **`title`**, **`tooltip`**, **`if`**, or **`if_or`**. Optional **`platforms`** (same as other vars) and **`wizard_ui`**: only **`hidden`** is allowed besides empty — to hide the rule on some OSes. Separators are not variables: no **`@`** placeholders and nothing is stored in wizard state. **macOS `.app`:** the running binary loads **`Contents/MacOS/bin/wizard_template.json`** inside the bundle — not the repo copy. After editing the template in the repository, **rebuild/reinstall** or **copy** the file into the app bundle so separators (and other JSON changes) appear.
 
@@ -555,6 +555,130 @@ To add system proxy inbound only on macOS:
   ]
 }
 ```
+
+---
+
+## Conditional Fields with `#if` (SPEC 067)
+
+When you need to include / exclude **a single field inside an already-emitted
+object** (rather than gating a whole `params[]` entry), use the **`#if`
+construct**. Two placement modes are supported, both implemented by the same
+walker in `core/template/substitute.go::SubstituteVarsInJSON`:
+
+### Map-spread mode — conditional fields inside an object
+
+`#if` is a regular key inside an object; on `true` its `value` (which must
+be an object) is **merged into the parent** and the `#if` key is removed.
+
+```jsonc
+// Proxy-in mixed inbound: optional `users` for auth-required mode.
+{
+  "type": "mixed",
+  "tag": "proxy-in",
+  "listen": "@proxy_in_listen",
+  "listen_port": "@proxy_in_listen_port",
+  "set_system_proxy": "@proxy_in_set_system_proxy",
+  "#if": {
+    "and": ["@proxy_in_auth_enabled"],
+    "value": {
+      "users": [{"username": "@proxy_in_username", "password": "@proxy_in_password"}]
+    }
+  }
+}
+```
+
+When `proxy_in_auth_enabled = true` the output contains `users`; otherwise
+the field is absent (anonymous proxy). No `else` → no field emitted.
+
+### Array-element mode — conditional list elements
+
+`#if` is the **only** key of an object that itself is a list element. On
+`true` the element is replaced by `value`; on `false` (no `else`) the
+element is removed (list shrinks by 1).
+
+```jsonc
+// TUN inbound: `interface_name` only on Windows / Linux (macOS doesn't
+// want a fixed interface_name). Collapses two near-identical params[]
+// entries into one.
+{
+  "name": "inbounds",
+  "if": ["@tun"],
+  "value": [{
+    "type": "tun",
+    "tag": "tun-in",
+    "address": ["@tun_address"],
+    "mtu": "@tun_mtu",
+    "auto_route": true,
+    "strict_route": "@strict_route",
+    "stack": "@tun_stack",
+    "#if": {
+      "and": [{"@platform": {"#in": ["windows", "linux"]}}],
+      "value": {"interface_name": "singbox-tun0"}
+    }
+  }]
+}
+```
+
+### Body fields of `#if`
+
+| Field | Required | Notes |
+|---|---|---|
+| `and` | exactly one of `and`/`or` | Non-empty list of predicates (AND, short-circuit) |
+| `or`  | exactly one of `and`/`or` | Non-empty list of predicates (OR, short-circuit) |
+| `value` | yes | What to substitute when condition is satisfied |
+| `else`  | optional | Substituted on `false`; absent → drop (map key removed / array element removed) |
+
+### Predicate forms (in `and` / `or`)
+
+| Form | Meaning |
+|---|---|
+| `"@bool_var"` | bool var must be `true` (bare strings reserved for bool vars only) |
+| `{"@var": "literal"}` | text var equals literal |
+| `{"@var": "#notEmpty"}` / `{"@var": "#isEmpty"}` | non-empty / empty check (works on text / text_list / bool) |
+| `{"@var": {"#in":    ["a","b"]}}` / `{"#notIn": [...]}` | text var is / isn't in the list (list may also be `"@text_list_var"`) |
+| `{"@var": {"#matches": "^pattern$"}}` | text var matches Go-regexp |
+| `{"#not": <predicate>}` | unary negation; inner can be any of the above (recursive) |
+
+### Runtime globals — `@platform` / `@arch`
+
+Reserved pseudo-vars available **only** inside `#if.and` / `#if.or`
+predicates. Resolved at runtime from `runtime.GOOS` / `runtime.GOARCH`
+(lower-case: `"darwin"`, `"windows"`, `"linux"`; `"amd64"`, `"arm64"`,
+`"386"`). They behave like text vars in predicates but cannot appear as
+bare bool predicates (`["@platform"]` → loader error).
+
+They are **not** valid in outer `params[].if` / `params[].if_or` — use
+`params[].platforms` for whole-entry platform gating, or `#if` inside
+`value` for per-field gating.
+
+### Common errors / loader-rejected forms
+
+| What | Why it errors |
+|---|---|
+| `"if": ["tun"]` (bare element) | SPEC 067 requires `@`-prefix on every `if` / `if_or` element. Fix: `"if": ["@tun"]`. |
+| `vars[].name == "platform"` (or `"arch"`) | Reserved — collides with runtime globals. Rename the var. |
+| `"if": ["@platform"]` (outer) | Runtime globals are only allowed inside `#if` predicates. Use `params[].platforms` instead. |
+| `#if` body missing `value` | `value` is required (even with `else`). |
+| Both `and` and `or` present in one `#if` body | Mutually exclusive — compose via nested `#if`. |
+| `and: []` / `or: []` | Predicate list must be non-empty. |
+| `{"#matches": "[broken"}` | Pattern must compile as Go-regexp. |
+| `{"#in": ["a"]}` against a `bool` var | `#in` / `#notIn` / `#matches` work only on text / text_list (or runtime globals). |
+
+### Forward compatibility
+
+Unknown `#`-prefixed keys (e.g. a future `#for_each`) are logged as warn
+and silently dropped — old launchers gracefully ignore constructs they
+don't understand. Custom templates can rely on this for non-breaking
+additions.
+
+> **Mobile parity:** `#if` and other `#*` constructs are **desktop-only**
+> until LxBox catches up. If you ship a template that's loaded by both
+> launchers, gate `#*` usage behind features the mobile launcher already
+> supports.
+
+See [`docs/TEMPLATE_REFERENCE.md`](TEMPLATE_REFERENCE.md) §9 for the full
+specification and [`SPECS/067-F-N-TEMPLATE_EXPRESSIONS/SPEC.md`](../SPECS/067-F-N-TEMPLATE_EXPRESSIONS/SPEC.md)
+for design rationale.
 
 ---
 

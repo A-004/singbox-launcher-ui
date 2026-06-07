@@ -337,7 +337,7 @@ func ApplyTemplateWithVars(configJSON json.RawMessage, params []TemplateParam, g
 	if len(vars) == 0 {
 		return out, nil
 	}
-	return SubstituteVarsInJSON(out, vars, resolved)
+	return SubstituteVarsInJSON(out, vars, resolved, goos, runtime.GOARCH)
 }
 
 func applyParamsFiltered(configJSON json.RawMessage, params []TemplateParam, goos string, vi map[string]TemplateVar, resolved map[string]ResolvedVar) (json.RawMessage, error) {

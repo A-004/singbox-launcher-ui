@@ -85,7 +85,7 @@
       "default_value": "172.16.0.1/30",
       "wizard_ui": "edit",
       "if": [
-        "tun"
+        "@tun"
       ],
       "title": "TUN interface address",
       "tooltip": "IPv4 CIDR for the TUN interface (inbounds address). Enabled when TUN is on for this platform."
@@ -96,7 +96,7 @@
       "default_value": "1492",
       "wizard_ui": "edit",
       "if": [
-        "tun"
+        "@tun"
       ],
       "title": "TUN MTU",
       "tooltip": "Maximum transmission unit for the TUN interface (numeric value in JSON)."
@@ -107,7 +107,7 @@
       "default_value": "false",
       "wizard_ui": "edit",
       "if": [
-        "tun"
+        "@tun"
       ],
       "title": "TUN strict route",
       "tooltip": "sing-box tun strict_route: stricter routing (fewer leaks); may break some LAN or split setups when enabled."
@@ -126,7 +126,7 @@
       ],
       "wizard_ui": "edit",
       "if": [
-        "tun"
+        "@tun"
       ],
       "title": "TUN stack",
       "tooltip": "sing-box inbound tun stack (system, gvisor, mixed). Mixed uses system TCP stack and gvisor UDP stack."
@@ -151,7 +151,7 @@
       "default_value": "127.0.0.1",
       "wizard_ui": "edit",
       "if": [
-        "enable_proxy_in"
+        "@enable_proxy_in"
       ],
       "title": "Proxy-in listen address",
       "tooltip": "Listen address for mixed inbound proxy-in."
@@ -162,7 +162,7 @@
       "default_value": "7890",
       "wizard_ui": "edit",
       "if": [
-        "enable_proxy_in"
+        "@enable_proxy_in"
       ],
       "title": "Proxy-in listen port",
       "tooltip": "Listen port for mixed inbound proxy-in."
@@ -176,10 +176,45 @@
       },
       "wizard_ui": "edit",
       "if": [
-        "enable_proxy_in"
+        "@enable_proxy_in"
       ],
       "title": "Proxy-in set system proxy",
       "tooltip": "Set system proxy through mixed inbound proxy-in. Some platforms require elevated privileges."
+    },
+    {
+      "name": "proxy_in_auth_enabled",
+      "type": "bool",
+      "default_value": "false",
+      "wizard_ui": "edit",
+      "if": [
+        "@enable_proxy_in"
+      ],
+      "title": "Proxy-in require authentication",
+      "tooltip": "When enabled, clients connecting to mixed inbound proxy-in must provide a username and password."
+    },
+    {
+      "name": "proxy_in_username",
+      "type": "text",
+      "default_value": "",
+      "wizard_ui": "edit",
+      "if": [
+        "@enable_proxy_in",
+        "@proxy_in_auth_enabled"
+      ],
+      "title": "Proxy-in username",
+      "tooltip": "Username for mixed inbound proxy-in authentication."
+    },
+    {
+      "name": "proxy_in_password",
+      "type": "text",
+      "default_value": "",
+      "wizard_ui": "edit",
+      "if": [
+        "@enable_proxy_in",
+        "@proxy_in_auth_enabled"
+      ],
+      "title": "Proxy-in password",
+      "tooltip": "Password for mixed inbound proxy-in authentication."
     },
     {
       "separator": true
@@ -590,7 +625,7 @@
           "type": "dns_server",
           "default": "yandex_udp",
           "if": [
-            "use_dns_override"
+            "@use_dns_override"
           ],
           "select": "local",
           "title": "DNS server",
@@ -601,7 +636,7 @@
           "type": "enum",
           "default": "77.88.8.8",
           "if": [
-            "use_dns_override"
+            "@use_dns_override"
           ],
           "title": "UDP server IP",
           "tooltip": "Applies to UDP only. DoH and DoT are pinned to 77.88.8.88 with SNI safe.dot.dns.yandex.net.",
@@ -715,7 +750,7 @@
           "format": "binary",
           "url": "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geoip/geoip-ru.srs",
           "if": [
-            "geoip_enabled"
+            "@geoip_enabled"
           ]
         }
       ],
@@ -729,7 +764,7 @@
           "title": "Yandex UDP",
           "description": "Yandex public DNS over UDP (port 53). IP from var dns_ip.",
           "if": [
-            "use_dns_override"
+            "@use_dns_override"
           ]
         },
         {
@@ -746,7 +781,7 @@
           "title": "Yandex DoH",
           "description": "Yandex Safe DoH (77.88.8.88, SNI safe.dot.dns.yandex.net).",
           "if": [
-            "use_dns_override"
+            "@use_dns_override"
           ]
         },
         {
@@ -762,7 +797,7 @@
           "title": "Yandex DoT",
           "description": "Yandex Safe DoT (77.88.8.88:853, SNI safe.dot.dns.yandex.net).",
           "if": [
-            "use_dns_override"
+            "@use_dns_override"
           ]
         }
       ],
@@ -812,7 +847,7 @@
         ],
         "server": "@dns_server",
         "if": [
-          "use_dns_override"
+          "@use_dns_override"
         ]
       }
     },
@@ -1316,7 +1351,7 @@
         "linux"
       ],
       "if": [
-        "tun"
+        "@tun"
       ],
       "value": [
         {
@@ -1339,7 +1374,7 @@
         "darwin"
       ],
       "if": [
-        "tun"
+        "@tun"
       ],
       "value": [
         {
@@ -1358,7 +1393,7 @@
     {
       "name": "inbounds",
       "if": [
-        "enable_proxy_in"
+        "@enable_proxy_in"
       ],
       "value": [
         {
@@ -1366,7 +1401,20 @@
           "tag": "proxy-in",
           "listen": "@proxy_in_listen",
           "listen_port": "@proxy_in_listen_port",
-          "set_system_proxy": "@proxy_in_set_system_proxy"
+          "set_system_proxy": "@proxy_in_set_system_proxy",
+          "#if": {
+            "and": [
+              "@proxy_in_auth_enabled"
+            ],
+            "value": {
+              "users": [
+                {
+                  "username": "@proxy_in_username",
+                  "password": "@proxy_in_password"
+                }
+              ]
+            }
+          }
         }
       ],
       "mode": "prepend"
@@ -1379,7 +1427,7 @@
         "darwin"
       ],
       "if": [
-        "tun"
+        "@tun"
       ],
       "mode": "prepend",
       "value": [
@@ -1398,7 +1446,7 @@
     {
       "name": "route.rules",
       "if": [
-        "enable_proxy_in"
+        "@enable_proxy_in"
       ],
       "mode": "prepend",
       "value": [

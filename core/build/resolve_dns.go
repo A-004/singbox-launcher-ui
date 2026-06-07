@@ -534,16 +534,17 @@ func substitutePresetDNSRule(p *template.Preset, varsMap map[string]string) (map
 
 // evalIfWithReason — то же что evalIf, но возвращает причину отказа для UI tooltip.
 // Возвращает (true, "") если активна. Иначе (false, "if=foo" / "if_or=a,b").
+// SPEC 067 Phase 3: `@`-префикс strip'ается перед lookup (loader требует канонической формы).
 func evalIfWithReason(ifList, ifOrList []string, varsMap map[string]string) (bool, string) {
 	for _, name := range ifList {
-		if !strings.EqualFold(varsMap[name], "true") {
+		if !strings.EqualFold(varsMap[strings.TrimPrefix(name, "@")], "true") {
 			return false, "if=" + name
 		}
 	}
 	if len(ifOrList) > 0 {
 		anyTrue := false
 		for _, name := range ifOrList {
-			if strings.EqualFold(varsMap[name], "true") {
+			if strings.EqualFold(varsMap[strings.TrimPrefix(name, "@")], "true") {
 				anyTrue = true
 				break
 			}

@@ -383,7 +383,12 @@ func VarAppliesOnGOOS(platforms []string, goos string) bool {
 
 // ParamBoolVarTrue: для if / if_or — bool var объявлена в шаблоне, подходит под текущую ОС (VarAppliesOnGOOS)
 // и в resolved равна "true". Не подходит под goos → false (как «нет переменной» для условия), без учёта resolved.
+//
+// SPEC 067 Phase 3: канонический формат имени — "@var". Префикс strip'ается в начале;
+// без префикса (legacy) запись считается допустимой только если validator уже её
+// пропустил (валидатор ловит missing-`@` на load — см. validateOuterIfList).
 func ParamBoolVarTrue(name string, varByName map[string]TemplateVar, resolved map[string]ResolvedVar, goos string) bool {
+	name = strings.TrimPrefix(name, "@")
 	vd, ok := varByName[name]
 	if !ok || vd.Type != "bool" {
 		return false

@@ -3,6 +3,7 @@ package template
 import (
 	"bytes"
 	"encoding/json"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -20,7 +21,9 @@ func isIntCastVar(name string) bool {
 }
 
 // SubstituteVarsInJSON заменяет литералы "@name" в дереве JSON на разрешённые значения.
-func SubstituteVarsInJSON(data []byte, vars []TemplateVar, resolved map[string]ResolvedVar) ([]byte, error) {
+// Параметры goos / goarch используются runtime-globals (@platform / @arch) в predicates
+// #if construct'а (см. SPEC 067).
+func SubstituteVarsInJSON(data []byte, vars []TemplateVar, resolved map[string]ResolvedVar, goos, goarch string) ([]byte, error) {
 	varTypes := make(map[string]string, len(vars))
 	for _, v := range vars {
 		if v.Separator {
@@ -34,18 +37,68 @@ func SubstituteVarsInJSON(data []byte, vars []TemplateVar, resolved map[string]R
 	if err := dec.Decode(&root); err != nil {
 		return nil, err
 	}
-	substituteWalk(&root, varTypes, resolved)
+	substituteWalk(&root, varTypes, resolved, goos, goarch)
 	return json.Marshal(root)
 }
 
-func substituteWalk(v *interface{}, varTypes map[string]string, resolved map[string]ResolvedVar) {
+func substituteWalk(v *interface{}, varTypes map[string]string, resolved map[string]ResolvedVar, goos, goarch string) {
 	switch x := (*v).(type) {
 	case map[string]interface{}:
+		// Pre-pass: control-constructs (keys starting with "#").
+		// Collect first to avoid mutating during iteration.
+		var ctrlKeys []string
+		for k := range x {
+			if strings.HasPrefix(k, "#") {
+				ctrlKeys = append(ctrlKeys, k)
+			}
+		}
+		for _, k := range ctrlKeys {
+			raw := x[k]
+			switch k {
+			case "#if":
+				handleIfMapSpread(x, raw, varTypes, resolved, goos, goarch)
+				// handleIfMapSpread always deletes "#if" itself.
+			default:
+				debuglog.WarnLog("substitute: unknown control-construct %q — dropping", k)
+				delete(x, k)
+			}
+		}
+		// Normal field walk.
 		for k, val := range x {
-			substituteWalk(&val, varTypes, resolved)
+			substituteWalk(&val, varTypes, resolved, goos, goarch)
 			x[k] = val
 		}
 	case []interface{}:
+		// Pre-pass for #if array-element wrappers. We need to filter/replace
+		// elements before falling into the legacy single-element collapse.
+		hasIfWrapper := false
+		for _, elem := range x {
+			if m, ok := elem.(map[string]interface{}); ok && len(m) == 1 {
+				if _, ok := m["#if"]; ok {
+					hasIfWrapper = true
+					break
+				}
+			}
+		}
+		if hasIfWrapper {
+			out := make([]interface{}, 0, len(x))
+			for _, elem := range x {
+				if m, ok := elem.(map[string]interface{}); ok && len(m) == 1 {
+					if body, ok := m["#if"].(map[string]interface{}); ok {
+						branch, take := handleIfArrayElement(body, varTypes, resolved, goos, goarch)
+						if take {
+							out = append(out, branch)
+						}
+						continue
+					}
+				}
+				substituteWalk(&elem, varTypes, resolved, goos, goarch)
+				out = append(out, elem)
+			}
+			*v = out
+			return
+		}
+		// Legacy single-element ["@text_list_var"] collapse.
 		if len(x) == 1 {
 			if s, ok := x[0].(string); ok && strings.HasPrefix(s, "@") {
 				name := s[1:]
@@ -58,7 +111,7 @@ func substituteWalk(v *interface{}, varTypes map[string]string, resolved map[str
 			}
 		}
 		for i := range x {
-			substituteWalk(&x[i], varTypes, resolved)
+			substituteWalk(&x[i], varTypes, resolved, goos, goarch)
 		}
 	case string:
 		if strings.HasPrefix(x, "@") {
@@ -111,6 +164,328 @@ func replacementForPlaceholder(name string, varTypes map[string]string, resolved
 			return 0
 		}
 		return n
+	}
+	return s
+}
+
+// ---------------------------------------------------------------------------
+// #if construct (SPEC 067)
+// ---------------------------------------------------------------------------
+
+// handleIfMapSpread evaluates the #if construct in map-spread mode and merges
+// the selected branch's fields into parent. Always deletes the "#if" key.
+func handleIfMapSpread(parent map[string]interface{}, rawBody interface{}, varTypes map[string]string, resolved map[string]ResolvedVar, goos, goarch string) {
+	defer delete(parent, "#if")
+	body, ok := rawBody.(map[string]interface{})
+	if !ok {
+		debuglog.WarnLog("substitute: #if body is not an object — skipping")
+		return
+	}
+	branch, take := selectIfBranch(body, varTypes, resolved, goos, goarch)
+	if !take {
+		return
+	}
+	// Substitute placeholders inside selected branch first.
+	substituteWalk(&branch, varTypes, resolved, goos, goarch)
+	branchMap, ok := branch.(map[string]interface{})
+	if !ok {
+		debuglog.WarnLog("substitute: #if branch in map-spread context is not an object — skipping merge")
+		return
+	}
+	for k, v := range branchMap {
+		parent[k] = v
+	}
+}
+
+// handleIfArrayElement evaluates the #if construct in array-element mode.
+// take=false means drop element from array; take=true means include branch
+// (substituted) at this index.
+func handleIfArrayElement(body map[string]interface{}, varTypes map[string]string, resolved map[string]ResolvedVar, goos, goarch string) (interface{}, bool) {
+	branch, take := selectIfBranch(body, varTypes, resolved, goos, goarch)
+	if !take {
+		return nil, false
+	}
+	substituteWalk(&branch, varTypes, resolved, goos, goarch)
+	return branch, true
+}
+
+// selectIfBranch evaluates the condition and picks the value/else branch.
+// Returns (branch, take=true) when a branch was selected; (nil, false) when
+// condition is false and no else is present.
+func selectIfBranch(body map[string]interface{}, varTypes map[string]string, resolved map[string]ResolvedVar, goos, goarch string) (interface{}, bool) {
+	cond := evaluateIfCondition(body, varTypes, resolved, goos, goarch)
+	if cond {
+		val, hasVal := body["value"]
+		if !hasVal {
+			debuglog.WarnLog("substitute: #if missing required \"value\" field — skipping")
+			return nil, false
+		}
+		return val, true
+	}
+	if elseVal, hasElse := body["else"]; hasElse {
+		return elseVal, true
+	}
+	return nil, false
+}
+
+// evaluateIfCondition extracts and/or and evaluates predicate list.
+// Defensive on both-present (warn, false) and neither-present (warn, true).
+// Empty `and` → vacuously true; empty `or` → vacuously false.
+func evaluateIfCondition(body map[string]interface{}, varTypes map[string]string, resolved map[string]ResolvedVar, goos, goarch string) bool {
+	andRaw, hasAnd := body["and"]
+	orRaw, hasOr := body["or"]
+	if hasAnd && hasOr {
+		debuglog.WarnLog("substitute: #if has both \"and\" and \"or\" — treating as false")
+		return false
+	}
+	if !hasAnd && !hasOr {
+		debuglog.WarnLog("substitute: #if has neither \"and\" nor \"or\" — treating as true")
+		return true
+	}
+	if hasAnd {
+		list, ok := andRaw.([]interface{})
+		if !ok {
+			debuglog.WarnLog("substitute: #if.and is not an array — treating as false")
+			return false
+		}
+		return evaluatePredicateList(list, true, varTypes, resolved, goos, goarch)
+	}
+	list, ok := orRaw.([]interface{})
+	if !ok {
+		debuglog.WarnLog("substitute: #if.or is not an array — treating as false")
+		return false
+	}
+	return evaluatePredicateList(list, false, varTypes, resolved, goos, goarch)
+}
+
+// evaluatePredicateList short-circuits AND/OR over predicates.
+func evaluatePredicateList(list []interface{}, isAnd bool, varTypes map[string]string, resolved map[string]ResolvedVar, goos, goarch string) bool {
+	if isAnd {
+		// Empty AND → vacuously true.
+		for _, p := range list {
+			if !evaluatePredicate(p, varTypes, resolved, goos, goarch) {
+				return false
+			}
+		}
+		return true
+	}
+	// Empty OR → vacuously false.
+	for _, p := range list {
+		if evaluatePredicate(p, varTypes, resolved, goos, goarch) {
+			return true
+		}
+	}
+	return false
+}
+
+// evaluatePredicate dispatches the 8 predicate forms (see SPEC 067).
+// Recurses for #not.
+func evaluatePredicate(p interface{}, varTypes map[string]string, resolved map[string]ResolvedVar, goos, goarch string) bool {
+	switch pv := p.(type) {
+	case string:
+		// Bare "@var" → bool template var → scalar == "true".
+		if !strings.HasPrefix(pv, "@") {
+			debuglog.WarnLog("substitute: #if predicate bare string %q must start with @ — treating as false", pv)
+			return false
+		}
+		name := strings.TrimPrefix(pv, "@")
+		// Runtime globals not allowed in bare form (per SPEC).
+		if name == "platform" || name == "arch" {
+			debuglog.WarnLog("substitute: #if bare predicate %q is not allowed for runtime globals — treating as false", pv)
+			return false
+		}
+		scalar, _, _, found := lookupVarScalar(name, resolved, goos, goarch)
+		if !found {
+			debuglog.WarnLog("substitute: #if predicate references unknown var @%s — treating as false", name)
+			return false
+		}
+		return strings.EqualFold(strings.TrimSpace(scalar), "true")
+	case map[string]interface{}:
+		if len(pv) != 1 {
+			debuglog.WarnLog("substitute: #if predicate object must have exactly one key — treating as false")
+			return false
+		}
+		for k, v := range pv {
+			if k == "#not" {
+				return !evaluatePredicate(v, varTypes, resolved, goos, goarch)
+			}
+			if strings.HasPrefix(k, "@") {
+				name := strings.TrimPrefix(k, "@")
+				return evaluateVarPredicate(name, v, varTypes, resolved, goos, goarch)
+			}
+			debuglog.WarnLog("substitute: #if predicate has unknown key %q — treating as false", k)
+			return false
+		}
+	}
+	debuglog.WarnLog("substitute: #if predicate has invalid shape — treating as false")
+	return false
+}
+
+// evaluateVarPredicate dispatches RHS forms for {"@var": ...} predicates.
+func evaluateVarPredicate(varName string, rhs interface{}, varTypes map[string]string, resolved map[string]ResolvedVar, goos, goarch string) bool {
+	scalar, isList, list, found := lookupVarScalar(varName, resolved, goos, goarch)
+	if !found {
+		debuglog.WarnLog("substitute: #if predicate references unknown var @%s — treating as false", varName)
+		return false
+	}
+	switch r := rhs.(type) {
+	case string:
+		// "#notEmpty" / "#isEmpty" — no-arg predicate.
+		if r == "#notEmpty" {
+			return checkNotEmpty(scalar, isList, list, varName, varTypes)
+		}
+		if r == "#isEmpty" {
+			return !checkNotEmpty(scalar, isList, list, varName, varTypes)
+		}
+		if strings.HasPrefix(r, "#") {
+			debuglog.WarnLog("substitute: #if predicate has unknown no-arg form %q — treating as false", r)
+			return false
+		}
+		// Literal equality — substitute @var if present.
+		lit := substituteSimpleString(r, varTypes, resolved)
+		return strings.TrimSpace(scalar) == lit
+	case map[string]interface{}:
+		if len(r) != 1 {
+			debuglog.WarnLog("substitute: #if predicate RHS object must have exactly one key — treating as false")
+			return false
+		}
+		for k, arg := range r {
+			switch k {
+			case "#in":
+				return checkInList(scalar, arg, varTypes, resolved)
+			case "#notIn":
+				return !checkInList(scalar, arg, varTypes, resolved)
+			case "#matches":
+				return checkMatches(scalar, arg, varTypes, resolved)
+			default:
+				debuglog.WarnLog("substitute: #if predicate has unknown arg-form %q — treating as false", k)
+				return false
+			}
+		}
+	}
+	debuglog.WarnLog("substitute: #if predicate RHS has invalid shape — treating as false")
+	return false
+}
+
+// lookupVarScalar resolves @platform / @arch globals (case-sensitive lower-case)
+// and otherwise looks up the name in `resolved`. Returns (scalar, isList, list,
+// found).
+func lookupVarScalar(name string, resolved map[string]ResolvedVar, goos, goarch string) (string, bool, []string, bool) {
+	if name == "platform" {
+		return goos, false, nil, true
+	}
+	if name == "arch" {
+		return goarch, false, nil, true
+	}
+	r, ok := resolved[name]
+	if !ok {
+		return "", false, nil, false
+	}
+	if len(r.List) > 0 || (r.Scalar == "" && r.List != nil) {
+		return r.Scalar, true, r.List, true
+	}
+	return r.Scalar, false, nil, true
+}
+
+// checkNotEmpty applies the #notEmpty predicate semantics:
+// text → len(trim(scalar)) > 0; text_list → len(list) > 0; bool → scalar == "true".
+func checkNotEmpty(scalar string, isList bool, list []string, varName string, varTypes map[string]string) bool {
+	if isList {
+		return len(list) > 0
+	}
+	if typ, ok := varTypes[varName]; ok && typ == "bool" {
+		return strings.EqualFold(strings.TrimSpace(scalar), "true")
+	}
+	if typ, ok := varTypes[varName]; ok && typ == "text_list" {
+		return len(list) > 0
+	}
+	return len(strings.TrimSpace(scalar)) > 0
+}
+
+// checkInList tests whether scalar is in the args list. argsRaw may be either
+// a JSON array of strings or a single "@text_list_var" reference.
+func checkInList(scalar string, argsRaw interface{}, varTypes map[string]string, resolved map[string]ResolvedVar) bool {
+	trimmed := strings.TrimSpace(scalar)
+	// Single "@text_list_var" string — resolve to list.
+	if s, ok := argsRaw.(string); ok {
+		if strings.HasPrefix(s, "@") {
+			name := strings.TrimPrefix(s, "@")
+			if typ, exists := varTypes[name]; exists && typ == "text_list" {
+				if r, rOK := resolved[name]; rOK {
+					for _, item := range r.List {
+						if item == trimmed {
+							return true
+						}
+					}
+					return false
+				}
+			}
+		}
+		debuglog.WarnLog("substitute: #if #in arg as string %q is not a @text_list_var — treating as false", s)
+		return false
+	}
+	// Array form.
+	list, ok := argsRaw.([]interface{})
+	if !ok {
+		debuglog.WarnLog("substitute: #if #in arg is not an array or @text_list_var — treating as false")
+		return false
+	}
+	for _, item := range list {
+		s, ok := item.(string)
+		if !ok {
+			continue
+		}
+		lit := substituteSimpleString(s, varTypes, resolved)
+		if lit == trimmed {
+			return true
+		}
+	}
+	return false
+}
+
+// checkMatches compiles the regex pattern (after @var substitution) and tests it
+// against trimmed scalar.
+func checkMatches(scalar string, patternRaw interface{}, varTypes map[string]string, resolved map[string]ResolvedVar) bool {
+	pat, ok := patternRaw.(string)
+	if !ok {
+		debuglog.WarnLog("substitute: #if #matches pattern is not a string — treating as false")
+		return false
+	}
+	pat = substituteSimpleString(pat, varTypes, resolved)
+	re, err := regexp.Compile(pat)
+	if err != nil {
+		debuglog.WarnLog("substitute: #if #matches invalid regex %q: %v — treating as false", pat, err)
+		return false
+	}
+	return re.MatchString(strings.TrimSpace(scalar))
+}
+
+// substituteSimpleString is used for controlled @var substitution inside
+// predicate args (literal equality, #matches pattern, individual #in elements).
+// If s == "@varname", resolves via replacementForPlaceholder and converts to
+// string. Otherwise returns s as-is.
+func substituteSimpleString(s string, varTypes map[string]string, resolved map[string]ResolvedVar) string {
+	if !strings.HasPrefix(s, "@") {
+		return s
+	}
+	name := strings.TrimPrefix(s, "@")
+	if name == "" || strings.Contains(name, "@") {
+		return s
+	}
+	rep := replacementForPlaceholder(name, varTypes, resolved)
+	if rep == nil {
+		return s
+	}
+	switch v := rep.(type) {
+	case string:
+		return v
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case int:
+		return strconv.Itoa(v)
 	}
 	return s
 }

@@ -16,9 +16,15 @@
   hash на релизе; в dev-сборке используется source-default (последний known-good
   merge commit).
 - **Lifecycle на upgrade:** `core/template_migration.go::InvalidateTemplateIfStale`
-  сравнивает `RequiredTemplateRef` с последним кешированным значением и при
-  несовпадении удаляет `bin/wizard_template.json` — следующий запуск переписывает
-  его из embedded copy (см. constants.WizardTemplate).
+  сравнивает `Settings.LastTemplateLauncherVersion` (записан после последнего
+  успешного «Download Template» через `MarkTemplateInstalled`) с
+  `constants.AppVersion`. При несовпадении удаляет `bin/wizard_template.json`
+  — на следующем запуске UI показывает «Download Template», после успешной
+  скачки `bin/settings.json` получает новый `last_template_launcher_version`.
+  Dev-сборки (`v-local-test`, `unnamed-dev`, `*-dirty`) пропускают
+  invalidation — иначе локальная разработка ломалась бы на каждом запуске.
+  См. SPEC 046 (механизм) и SPEC 067 (breaking template format — `#if` +
+  `@`-only outer `if[]` — триггерится тем же bump `AppVersion`).
 
 ---
 
@@ -271,20 +277,222 @@ launcher start
      │
      ▼
 InvalidateTemplateIfStale(execDir)
-     │   compare RequiredTemplateRef vs cached marker (.template_ref)
-     │   mismatch → unlink bin/wizard_template.json + write new marker
+     │   compare Settings.LastTemplateLauncherVersion vs constants.AppVersion
+     │   stale (LastTemplateLauncherVersion < AppVersion) → unlink bin/wizard_template.json
+     │   (dev AppVersion skip: v-local-test / unnamed-dev / *-dirty)
      ▼
-extractEmbeddedTemplate (if file missing) → copy embedded → bin/wizard_template.json
+UI shows «Download Template» (если файл отсутствует)
+     │   юзер кликает → скачивается с raw.githubusercontent.com под pinned ref
+     │   MarkTemplateInstalled → bin/settings.json::last_template_launcher_version = AppVersion
      ▼
 LoadTemplateData
 ```
 
 Реализация: `core/template_migration.go::InvalidateTemplateIfStale` +
-`core/template/loader.go::LoadTemplateData`.
+`internal/locale/settings.go::LastTemplateLauncherVersion` /
+`MarkTemplateInstalled` + `core/template/loader.go::LoadTemplateData`.
+
+Breaking template format changes (например SPEC 067 — `#if` + `@`-only outer
+`if[]`) триггерятся этим же механизмом: после bump `AppVersion` на первом
+запуске старый кеш удаляется → юзер скачивает новый шаблон одним кликом.
 
 ---
 
-## 9. Где лежит реализация
+## 9. `#if` construct (SPEC 067) — desktop only
+
+Template expressions v1 — declarative conditional field inclusion прямо в
+шаблоне, без post-substitute Go-хуков. Реализован в
+`core/template/substitute.go::SubstituteVarsInJSON` (walker) и
+`core/template/template_validate.go::validateIfConstruct` (load-time
+validation). Покрывает кейсы вида «одно поле внутри уже эмиченного объекта
+зависит от bool var / runtime platform».
+
+> **Mobile parity:** все `#*` constructs (`#if`, потенциальные
+> `#for_each` / `#include`) — **desktop only** до подтяжки реализации в
+> LxBox. Шаблоны, шарящиеся между лаунчерами, должны helmet'ить
+> платформы которых поддержка ещё нет.
+
+### 9.1 Naming discipline — `#` vs bare vs `@`
+
+| Префикс | Где | Зачем маркер |
+|---------|-----|--------------|
+| `#` | Construct gateway (`#if`) + predicates в `and`/`or` (`#in`, `#not`, `#notEmpty`, …) | Scope-switch: walker отличает control-key от data-key в произвольном объекте; predicate-имя от string literal в predicate list |
+| bare | Inner keys тела `#if` (`and`, `or`, `value`, `else`) + outer legacy keys (`params[].if`, `params[].if_or`, `params[].value`, `params[].mode`) | Walker уже в known scope, маркер избыточен |
+| `@` | Var-ref (только имя из `vars[]`; bare `"var"` → loader error) + runtime globals `@platform` / `@arch` (только в `#if` predicates) | Унифицированная нотация var-ref'ов везде; неоднозначность «literal vs var name» устранена |
+
+Forward compatibility: неизвестный ключ начинающийся с `#` → walker
+логирует warn и удаляет (graceful degradation). Это позволяет добавлять
+новые constructs (`#for_each`, `#include`, …) без breaking change для
+старых лаунчеров.
+
+### 9.2 Форма
+
+```jsonc
+"#if": {
+  "and":   [<predicate>, <predicate>, ...],  // mutually exclusive с `or`
+  "or":    [<predicate>, <predicate>, ...],  // mutually exclusive с `and`
+  "value": <any JSON>,                        // обязателен, then-ветка
+  "else":  <any JSON>                         // опциональный else-ветка
+}
+```
+
+Правила (validation на load):
+* Ровно один из `and` / `or` непустым списком. Нет / оба / пустой list → loader error.
+* `value` обязателен (не nil).
+* `else` опционален; null в `value`/`else` → error в map-spread (нельзя merge), legal в array-element.
+
+### 9.3 Два режима размещения
+
+**Map-spread mode** — `#if` как ключ внутри объекта:
+
+```jsonc
+{
+  "type": "mixed",
+  "tag": "proxy-in",
+  "#if": {
+    "and": ["@proxy_in_auth_enabled"],
+    "value": {"users": [{"username": "@proxy_in_username", "password": "@proxy_in_password"}]}
+  }
+}
+```
+
+* condition true → `value` обязан быть объектом; его поля мерджатся в
+  родительский объект (collision → branch overrides). Ключ `#if` удаляется.
+* condition false: при наличии `else` мерджатся его поля; без `else`
+  ключ просто удаляется (parent unchanged).
+
+**Array-element mode** — `#if` как единственный ключ объекта-элемента
+массива:
+
+```jsonc
+"options": [
+  "always",
+  {"#if": {"and": ["@dark_mode"], "value": "extra-dark", "else": "extra-light"}},
+  "regular"
+]
+```
+
+* condition true → элемент заменяется на `value` (любой тип).
+* condition false: при наличии `else` — заменяется на `else`; без `else`
+  — элемент **удаляется** из массива (длина -1).
+
+Detection rule: элемент — `#if` wrapper, если это объект из РОВНО одного
+ключа `#if`. Иначе обычный элемент (с возможным spread-mode `#if` внутри).
+
+### 9.4 Expression language — predicates
+
+Каждый элемент `and` / `or` — predicate. Восемь форм:
+
+| Форма | Семантика |
+|---|---|
+| `"@var"` | bool template var → `scalar == "true"` (только bool var; **не** `@platform` / `@arch`) |
+| `{"@var": "literal"}` | equality: `trim(scalar) == "literal"` (literal **не** начинается с `#`) |
+| `{"@var": "#notEmpty"}` | text → `len(trim(scalar)) > 0`; text_list → `len(list) > 0`; bool → `scalar == "true"` |
+| `{"@var": "#isEmpty"}` | инверсия `#notEmpty` |
+| `{"@var": {"#in":      ["a","b","c"]}}` | `trim(scalar)` присутствует в списке (`["..."]` или `@text_list_var`) |
+| `{"@var": {"#notIn":   ["a","b","c"]}}` | `trim(scalar)` отсутствует в списке |
+| `{"@var": {"#matches": "^[a-z]+$"}}` | `trim(scalar)` match'ит Go-regexp |
+| `{"#not": <predicate>}` | унарная негация (recursive inner predicate) |
+
+Substitution внутри predicate args: literal в equality, элементы `#in` /
+`#notIn`, regex pattern в `#matches` могут содержать `@var` — walker
+substitute'ит их **до** оценки predicate. ИСКЛЮЧЕНИЕ: bare `"@var"` в
+predicate list и ключ `"@var"` в single-key object'е walker не
+substitute'ит (иначе var-reference потеряется).
+
+Пример:
+
+```jsonc
+"and": [
+  "@flag_a",                                       // bool true
+  {"#not": "@flag_b"},                             // bool false
+  {"@platform": {"#in": ["darwin", "linux"]}},     // runtime GOOS
+  {"@arch": "amd64"},                              // runtime GOARCH
+  {"@protocol": {"#in": ["vless", "trojan"]}},
+  {"#not": {"@hostname": {"#matches": "^test-"}}}
+]
+```
+
+### 9.5 Runtime globals — `@platform` / `@arch`
+
+Зарезервированные pseudo-var'ы, доступные **только** в `#if.and` /
+`#if.or` predicates:
+
+| Global | Runtime source | Значения |
+|---|---|---|
+| `@platform` | `runtime.GOOS` | `"darwin"`, `"windows"`, `"linux"` |
+| `@arch` | `runtime.GOARCH` | `"amd64"`, `"arm64"`, `"386"` |
+
+Семантика — те же predicate-формы, что у text-var (equality, `#in`,
+`#notIn`, `#matches`, `#notEmpty` / `#isEmpty`). Bare `"@platform"` /
+`"@arch"` в predicate list (bool-form) → validation error: они не bool.
+
+Case-sensitive lower-case (как `runtime.GOOS` / `runtime.GOARCH`).
+**Reserved:** `vars[].name == "platform"` или `"arch"` → loader error
+(collision с globals). **Outer `if` / `if_or`** runtime globals
+**не принимают** — там только bool template vars; platform-gate на уровне
+param по-прежнему через `params[].platforms[]`.
+
+Win7-сборка (`windows/386`): `{"@platform": "windows"}` + `{"@arch": "386"}`
+в одном `and` — эквивалент «только win7-bin».
+
+### 9.6 Outer `if` / `if_or` — канонический `@`-only
+
+`params[].if` / `params[].if_or`, `vars[].if` / `vars[].if_or`,
+`presets[].if` / `presets[].if_or` принимают **только** `@`-prefixed
+var-ref'ы. Bare `"tun"` → loader error на template load:
+
+```
+template: params[N].if has bare var-ref "tun" in if[]; use canonical "@tun" form
+```
+
+Var должна существовать в `vars[]` и иметь `type: "bool"`. Runtime globals
+(`@platform` / `@arch`) в outer `if[]` **запрещены** — только в `#if`
+predicates.
+
+### 9.7 Реальный пример — TUN inbound без дублирования
+
+Было (две `params[].name="inbounds"` entries, различающиеся **только**
+наличием `interface_name`):
+
+```jsonc
+{ "name": "inbounds", "platforms": ["windows", "linux"], "if": ["@tun"],
+  "value": [{ "type": "tun", "tag": "tun-in", "interface_name": "singbox-tun0",
+              "address": ["@tun_address"], "mtu": "@tun_mtu",
+              "auto_route": true, "strict_route": "@strict_route",
+              "stack": "@tun_stack" }] },
+{ "name": "inbounds", "platforms": ["darwin"], "if": ["@tun"],
+  "value": [{ "type": "tun", "tag": "tun-in",
+              "address": ["@tun_address"], "mtu": "@tun_mtu",
+              "auto_route": true, "strict_route": "@strict_route",
+              "stack": "@tun_stack" }] }
+```
+
+Стало (одна entry, platform-conditional поле инкапсулировано в map-spread
+`#if`):
+
+```jsonc
+{
+  "name": "inbounds",
+  "if": ["@tun"],
+  "value": [{
+    "type": "tun", "tag": "tun-in",
+    "address": ["@tun_address"], "mtu": "@tun_mtu",
+    "auto_route": true, "strict_route": "@strict_route",
+    "stack": "@tun_stack",
+    "#if": {
+      "and": [{"@platform": {"#in": ["windows", "linux"]}}],
+      "value": {"interface_name": "singbox-tun0"}
+    }
+  }]
+}
+```
+
+Подробности и edge cases — `SPECS/067-F-N-TEMPLATE_EXPRESSIONS/SPEC.md`.
+
+---
+
+## 10. Где лежит реализация
 
 | Файл | Что |
 |------|-----|
@@ -292,9 +500,9 @@ LoadTemplateData
 | `core/template/preset_loader.go` | `LoadPresets` + validation |
 | `core/template/preset_types.go` | Preset / PresetVar / PresetRuleSet / PresetDNSServer / PresetOutbound types |
 | `core/template/preset_lite.go` | `PresetLite` interface + `PresetLiteMap` (для sync_dns без cyclic deps) |
-| `core/template/vars_resolve.go` | varsMap build + if/if_or eval |
-| `core/template/substitute.go` | recursive `@var` substitution |
-| `core/template/template_validate.go` | template-side validation (uniqueness, refs resolvable) |
+| `core/template/vars_resolve.go` | varsMap build + outer `if`/`if_or` eval (strict `@`-prefix, SPEC 067) |
+| `core/template/substitute.go` | recursive `@var` substitution + `#if` walker / predicate engine / runtime globals `@platform`/`@arch` (SPEC 067) |
+| `core/template/template_validate.go` | template-side validation (uniqueness, refs resolvable, `#if` construct + outer `@`-only refs — SPEC 067) |
 | `internal/constants/constants.go` | `RequiredTemplateRef` + `WizardTemplateFileName` |
 | `core/template_migration.go` | `InvalidateTemplateIfStale` (stale template invalidation) |
 | `core/build/preset_expand.go` | preset expand at build time (substitute + tag prefix + filter) |

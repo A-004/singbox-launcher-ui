@@ -87,7 +87,10 @@ singbox-launcher/
 │   │   │
 │   ├── template_migration.go  # SPEC 046: инвалидация локального шаблона на апгрейде
 │   │   │   - InvalidateTemplateIfStale()           # Удалить bin/wizard_template.json,
-│   │   │                                            #   если он установлен предыдущей версией лаунчера
+│   │   │                                            #   если Settings.LastTemplateLauncherVersion < constants.AppVersion
+│   │   │                                            #   (dev AppVersion — пропуск). Breaking template
+│   │   │                                            #   format changes (SPEC 067: #if + @-only outer if)
+│   │   │                                            #   используют этот же механизм через bump AppVersion.
 │   │   │
 │   ├── wintun_downloader.go   # Загрузка wintun.dll
 │   │   │   - DownloadWintunDLL()                     # Загрузка wintun.dll
@@ -987,9 +990,9 @@ singbox-launcher/
 
 **template/** - Работа с единым шаблоном конфигурации
 - `loader.go`:
-  - `LoadTemplateData()` - загрузка единого JSON-шаблона (`wizard_template.json`), парсинг секций, применение `params` по текущей платформе, фильтрация `selectable_rules` по `platforms`; условия **`params.if`** / **`params.if_or`** смотрят на bool-**`vars`**: при несовпадении **`vars[].platforms`** с текущей ОС переменная даёт **false** в условии (см. **`VarAppliesOnGOOS`** / **`ParamBoolVarTrue`** в **`ui/wizard/template/vars_resolve.go`**, **docs/CREATE_WIZARD_TEMPLATE.md**)
+  - `LoadTemplateData()` - загрузка единого JSON-шаблона (`wizard_template.json`), парсинг секций, применение `params` по текущей платформе, фильтрация `selectable_rules` по `platforms`; условия **`params.if`** / **`params.if_or`** смотрят на bool-**`vars`**: при несовпадении **`vars[].platforms`** с текущей ОС переменная даёт **false** в условии (см. **`VarAppliesOnGOOS`** / **`ParamBoolVarTrue`** в **`core/template/vars_resolve.go`**, **docs/CREATE_WIZARD_TEMPLATE.md**)
   - `GetTemplateFileName()` - возврат имени файла шаблона (`wizard_template.json`, единый для всех платформ)
-  - Объектные **`vars[].default_value`**: **`VarDefaultValue`** / **`defaultValueKeyOrder`** в **`ui/wizard/template/vars_default.go`** (как **`platforms`**: только **`GOOS`**, плюс **`win7`** для **windows/386**, затем **`default`**), разрешение в **`vars_resolve.go`** — **docs/CREATE_WIZARD_TEMPLATE.md** / **_RU.md**
+  - Объектные **`vars[].default_value`**: **`VarDefaultValue`** / **`defaultValueKeyOrder`** в **`core/template/vars_default.go`** (как **`platforms`**: только **`GOOS`**, плюс **`win7`** для **windows/386**, затем **`default`**), разрешение в **`vars_resolve.go`** — **docs/CREATE_WIZARD_TEMPLATE.md** / **_RU.md**
   - `GetTemplateURL()` - URL шаблона на GitHub, pinned на коммит сборки через **`constants.RequiredTemplateRef`** (CI инжектит SHA через **-ldflags**, локальные сборки берут source-default = последний `main` HEAD; см. **SPEC 046**, `docs/RELEASE_PROCESS.md §5`)
   - `UnifiedTemplate` struct - структура JSON-шаблона (`parser_config`, `config`, `selectable_rules`, `params`)
   - `UnifiedSelectableRule` struct - правило в шаблоне (label, description, default, platforms, rule_set, rule/rules)
@@ -1000,6 +1003,16 @@ singbox-launcher/
   - `HasOutbound()` - проверка наличия поля outbound в правиле
   - `GetDefaultOutbound()` - извлечение outbound по умолчанию из правила
   - `CloneRuleRaw()` - глубокое копирование правила (map[string]interface{})
+- `substitute.go` (SPEC 067):
+  - `SubstituteVarsInJSON(data, vars, resolved, goos, goarch)` — recursive `@var` substitution + walker для control-construct `#if` (map-spread и array-element режимы); параметры `goos` / `goarch` нужны для runtime globals `@platform` / `@arch` в predicates
+  - `handleIfMapSpread()` / `handleIfArrayElement()` / `selectIfBranch()` — два режима размещения `#if`
+  - `evaluatePredicate()` / `evaluateVarPredicateRHS()` — 8 форм predicate'ов (bare bool, equality, `#notEmpty`/`#isEmpty`, `#in`/`#notIn`, `#matches`, `#not`); short-circuit AND/OR
+  - Неизвестные `#*` ключи — warn + drop (forward-compat для будущих constructs)
+- `template_validate.go` (SPEC 067):
+  - `ValidateWizardTemplate()` — главная точка валидации (uniqueness, refs, type-check, `#if` body, outer `@`-only)
+  - `validateOuterIfRefs()` / `validateOuterIfList()` — strict `@`-prefix на каждом элементе `params[].if` / `if_or`, `vars[].if` / `if_or`, `presets[].if` / `if_or`; bare → loader error
+  - `validateIfConstruct()` / `validateIfBody()` / `validateIfPredicate()` — type-checked walk дерева value, валидация `#if` (and/or mutual exclusion, value required, predicate forms, regex compile)
+  - `reservedRuntimeGlobalNames` (`platform` / `arch`) — collision с runtime globals в `vars[].name` → loader error
 
 **utils/** - Утилиты
 - `comparison.go`:

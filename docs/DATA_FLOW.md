@@ -17,16 +17,22 @@ launcher start
      │
      ▼
 core/template_migration.InvalidateTemplateIfStale(execDir)
-     │   compare RequiredTemplateRef vs cached marker
-     │   mismatch → unlink bin/wizard_template.json
+     │   compare Settings.LastTemplateLauncherVersion vs constants.AppVersion
+     │   stale → unlink bin/wizard_template.json (dev AppVersion — пропуск)
+     │   UI на следующем запуске показывает «Download Template»;
+     │   после скачки MarkTemplateInstalled пишет AppVersion в settings.json
      ▼
 extractEmbeddedTemplate (if file missing)
      │
      ▼
 core/template.LoadTemplateData(execDir)
      │   read JSON
+     │   ValidateWizardTemplate (включая #if construct и outer @-only — SPEC 067)
      │   ApplyParams(runtime.GOOS) → effective Config sections
-     │   substitute @vars defaults
+     │   SubstituteVarsInJSON(goos, goarch):
+     │     · resolves "@var" placeholders во всём JSON-дереве
+     │     · обрабатывает "#if" construct (map-spread + array-element),
+     │       runtime globals @platform / @arch — SPEC 067
      │   ParsePresets + filter platforms
      ▼
 model.TemplateData (immutable for session)
@@ -325,3 +331,4 @@ emit, а не stale snapshot.
 | SPECS/056-R-N-DNS_SCHEMA_REDESIGN | Flat `dns_options.servers/rules[]` kind discriminator + Resolver pattern |
 | SPECS/057-R-N-OUTBOUNDS_PRESET_BINDING | Outbound `Ref` + `Updates[]` schema + lifecycle Sync |
 | SPECS/058-R-N-STATE_AS_TEMPLATE_DIFF | State outbounds — thin refs (`#TEMPLATE#`/preset_id) + USER patch (`#USER#`); migration + auto-upgrade |
+| SPECS/067-F-N-TEMPLATE_EXPRESSIONS | `#if` construct (map-spread + array-element) + expression language predicates + runtime globals `@platform`/`@arch` + strict `@`-only var-ref в outer `if[]` |

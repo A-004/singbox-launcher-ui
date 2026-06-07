@@ -254,16 +254,20 @@ func filterActiveVars(vars []template.PresetVar, varsMap map[string]string) map[
 // Сам факт «var истинна» = varsMap[name] == "true" (case-insensitive).
 //
 // Пустые ifList+ifOrList → true (фрагмент всегда активен).
+//
+// SPEC 067 Phase 3: канонический формат имени — "@var" (loader validation требует
+// `@`-префикс). Префикс strip'ается перед lookup; bare имена (legacy) тоже
+// работают — но валидатор их отвергает на load.
 func evalIf(ifList, ifOrList []string, varsMap map[string]string) bool {
 	for _, name := range ifList {
-		if !strings.EqualFold(varsMap[name], "true") {
+		if !strings.EqualFold(varsMap[strings.TrimPrefix(name, "@")], "true") {
 			return false
 		}
 	}
 	if len(ifOrList) > 0 {
 		anyTrue := false
 		for _, name := range ifOrList {
-			if strings.EqualFold(varsMap[name], "true") {
+			if strings.EqualFold(varsMap[strings.TrimPrefix(name, "@")], "true") {
 				anyTrue = true
 				break
 			}
