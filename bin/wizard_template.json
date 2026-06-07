@@ -1346,33 +1346,6 @@
   "params": [
     {
       "name": "inbounds",
-      "platforms": [
-        "windows",
-        "linux"
-      ],
-      "if": [
-        "@tun"
-      ],
-      "value": [
-        {
-          "type": "tun",
-          "tag": "tun-in",
-          "interface_name": "singbox-tun0",
-          "address": [
-            "@tun_address"
-          ],
-          "mtu": "@tun_mtu",
-          "auto_route": true,
-          "strict_route": "@strict_route",
-          "stack": "@tun_stack"
-        }
-      ]
-    },
-    {
-      "name": "inbounds",
-      "platforms": [
-        "darwin"
-      ],
       "if": [
         "@tun"
       ],
@@ -1386,7 +1359,22 @@
           "mtu": "@tun_mtu",
           "auto_route": true,
           "strict_route": "@strict_route",
-          "stack": "@tun_stack"
+          "stack": "@tun_stack",
+          "#if": {
+            "and": [
+              {
+                "@platform": {
+                  "#in": [
+                    "windows",
+                    "linux"
+                  ]
+                }
+              }
+            ],
+            "value": {
+              "interface_name": "singbox-tun0"
+            }
+          }
         }
       ]
     },
