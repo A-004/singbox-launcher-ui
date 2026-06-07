@@ -40,9 +40,13 @@ type PresetFragments struct {
 	// Пустой если все элементы preset.rule_set имели if=false.
 	RuleSets []map[string]interface{}
 
-	// RoutingRule — routing rule (preset.rule после substitute и prefix).
-	// nil если rule имеет if=false или после dangling-cleanup стал пустым.
-	RoutingRule map[string]interface{}
+	// RoutingRules — routing rules (preset.rules после substitute и prefix).
+	// Каждая entry эмитится в порядке исходного списка. Empty slice если все
+	// rules имеют if=false или после dangling-cleanup стали пустыми.
+	//
+	// SPEC 067 Phase 9: было одиночное RoutingRule, теперь slice — соответствует
+	// Preset.Rules []map (multi-rule presets как split-all-traffic).
+	RoutingRules []map[string]interface{}
 
 	// DNSRule — dns rule (preset.dns_rule). nil если нет / if=false / dangling.
 	DNSRule map[string]interface{}
@@ -67,7 +71,7 @@ func (w ExpandWarning) String() string {
 // userVars — значения переменных из state.rule.body.vars (только diff от
 // default'ов; пустые / отсутствующие резолвятся через template.preset.vars[].default).
 //
-// goos / goarch — для runtime globals @platform / @arch в #if predicates
+// goos / goarch — для runtime globals @runtime.platform / @runtime.arch в #if predicates
 // (SPEC 067). Callers передают runtime.GOOS / runtime.GOARCH; тесты — fakes.
 //
 // Возвращает (fragments, warnings, ok). ok=false если preset нельзя раскрыть
@@ -134,36 +138,46 @@ func ExpandPreset(preset *template.Preset, userVars map[string]string, goos, goa
 		frags.RuleSets = append(frags.RuleSets, m)
 	}
 
-	// === 4. Resolve routing rule ===
-	if preset.Rule != nil {
-		ruleIf, ruleIfOr := extractIfFromMap(preset.Rule)
-		if evalIf(ruleIf, ruleIfOr, varsMap) {
-			raw, err := deepCopyMap(preset.Rule)
-			if err != nil {
-				warnings = append(warnings, ExpandWarning{preset.ID,
-					fmt.Sprintf("deep copy rule: %v", err)})
-			} else {
-				substituted, ok := substitutePresetBody(raw, preset.Vars, varsMap, goos, goarch)
-				if !ok {
-					warnings = append(warnings, ExpandWarning{preset.ID, "unresolved @var in rule"})
-					return nil, warnings, false
-				}
-				m, _ := substituted.(map[string]interface{})
-				delete(m, "if")
-				delete(m, "if_or")
-				// Rewrite rule_set refs: local → prefixed, filter dangling.
-				rewriteRuleSetRefs(m, preset.ID, emittedTags)
-				// Apply outbound sentinels (reject/drop) — shared util с UI.
-				if outbound, ok := m["outbound"].(string); ok {
-					m = outboundutil.ApplyOutboundToRule(m, outbound)
-				}
-				if !isRuleEmpty(m, emittedTags) {
-					frags.RoutingRule = m
-				} else {
-					warnings = append(warnings, ExpandWarning{preset.ID,
-						"routing rule dropped (no valid rule_set refs after if-filter)"})
-				}
-			}
+	// === 4. Resolve routing rules ===
+	// SPEC 067 Phase 9: preset.Rules — slice. Каждая rule имеет свой `if`/`if_or`
+	// gate. Эмитятся в порядке исходного списка.
+	for idx, ruleMap := range preset.Rules {
+		if ruleMap == nil {
+			continue
+		}
+		ruleIf, ruleIfOr := extractIfFromMap(ruleMap)
+		if !evalIf(ruleIf, ruleIfOr, varsMap) {
+			continue
+		}
+		raw, err := deepCopyMap(ruleMap)
+		if err != nil {
+			warnings = append(warnings, ExpandWarning{preset.ID,
+				fmt.Sprintf("deep copy rules[%d]: %v", idx, err)})
+			continue
+		}
+		substituted, ok := substitutePresetBody(raw, preset.Vars, varsMap, goos, goarch)
+		if !ok {
+			warnings = append(warnings, ExpandWarning{preset.ID,
+				fmt.Sprintf("unresolved @var in rules[%d]", idx)})
+			return nil, warnings, false
+		}
+		m, _ := substituted.(map[string]interface{})
+		if m == nil {
+			continue
+		}
+		delete(m, "if")
+		delete(m, "if_or")
+		// Rewrite rule_set refs: local → prefixed, filter dangling.
+		rewriteRuleSetRefs(m, preset.ID, emittedTags)
+		// Apply outbound sentinels (reject/drop) — shared util с UI.
+		if outbound, ok := m["outbound"].(string); ok {
+			m = outboundutil.ApplyOutboundToRule(m, outbound)
+		}
+		if !isRuleEmpty(m, emittedTags) {
+			frags.RoutingRules = append(frags.RoutingRules, m)
+		} else {
+			warnings = append(warnings, ExpandWarning{preset.ID,
+				fmt.Sprintf("rules[%d] dropped (no valid rule_set refs after if-filter)", idx)})
 		}
 	}
 
@@ -314,7 +328,7 @@ func extractIfFromMap(m map[string]interface{}) (ifList, ifOrList []string) {
 // либо если marshal/unmarshal сломался — caller должен пропустить preset
 // целиком (legacy substituteAny semantics).
 //
-// goos / goarch — для @platform / @arch globals в #if predicates.
+// goos / goarch — для @runtime.platform / @runtime.arch globals в #if predicates.
 func substitutePresetBody(raw interface{}, presetVars []template.PresetVar, varsMap map[string]string, goos, goarch string) (interface{}, bool) {
 	if raw == nil {
 		return nil, true

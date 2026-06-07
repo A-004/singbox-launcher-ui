@@ -20,9 +20,35 @@ func isIntCastVar(name string) bool {
 	return false
 }
 
+// runtimeGlobalPrefix — пространство имён runtime-globals в #if predicates (SPEC 067).
+// Ссылка вида "@runtime.platform" / "@runtime.arch" резолвится не из vars, а из
+// runtime.GOOS / runtime.GOARCH. Namespace расширяемый: новые поля добавляются в
+// runtimeGlobalFields + dispatch в lookupVarScalar.
+const runtimeGlobalPrefix = "runtime."
+
+// runtimeGlobalFields — известные поля namespace @runtime (без префикса).
+var runtimeGlobalFields = map[string]struct{}{
+	"platform": {},
+	"arch":     {},
+}
+
+// isRuntimeGlobalRef true для имён вида "runtime.*" (после strip "@").
+func isRuntimeGlobalRef(name string) bool {
+	return strings.HasPrefix(name, runtimeGlobalPrefix)
+}
+
+// isKnownRuntimeGlobal true только для @runtime.<известное поле>.
+func isKnownRuntimeGlobal(name string) bool {
+	if !strings.HasPrefix(name, runtimeGlobalPrefix) {
+		return false
+	}
+	_, ok := runtimeGlobalFields[name[len(runtimeGlobalPrefix):]]
+	return ok
+}
+
 // SubstituteVarsInJSON заменяет литералы "@name" в дереве JSON на разрешённые значения.
-// Параметры goos / goarch используются runtime-globals (@platform / @arch) в predicates
-// #if construct'а (см. SPEC 067).
+// Параметры goos / goarch используются runtime-globals (@runtime.platform / @runtime.arch)
+// в predicates #if construct'а (см. SPEC 067).
 func SubstituteVarsInJSON(data []byte, vars []TemplateVar, resolved map[string]ResolvedVar, goos, goarch string) ([]byte, error) {
 	out, _, err := substituteVarsInJSONInternal(data, vars, resolved, goos, goarch, false)
 	return out, err
@@ -344,7 +370,7 @@ func evaluatePredicate(p interface{}, varTypes map[string]string, resolved map[s
 		}
 		name := strings.TrimPrefix(pv, "@")
 		// Runtime globals not allowed in bare form (per SPEC).
-		if name == "platform" || name == "arch" {
+		if isRuntimeGlobalRef(name) {
 			debuglog.WarnLog("substitute: #if bare predicate %q is not allowed for runtime globals — treating as false", pv)
 			return false
 		}
@@ -421,15 +447,20 @@ func evaluateVarPredicate(varName string, rhs interface{}, varTypes map[string]s
 	return false
 }
 
-// lookupVarScalar resolves @platform / @arch globals (case-sensitive lower-case)
-// and otherwise looks up the name in `resolved`. Returns (scalar, isList, list,
-// found).
+// lookupVarScalar resolves @runtime.* globals (case-sensitive lower-case) and
+// otherwise looks up the name in `resolved`. Returns (scalar, isList, list,
+// found). Unknown @runtime.<field> → not found (defensive).
 func lookupVarScalar(name string, resolved map[string]ResolvedVar, goos, goarch string) (string, bool, []string, bool) {
-	if name == "platform" {
-		return goos, false, nil, true
-	}
-	if name == "arch" {
-		return goarch, false, nil, true
+	if isRuntimeGlobalRef(name) {
+		switch name[len(runtimeGlobalPrefix):] {
+		case "platform":
+			return goos, false, nil, true
+		case "arch":
+			return goarch, false, nil, true
+		default:
+			debuglog.WarnLog("substitute: unknown runtime global @%s — treating as not found", name)
+			return "", false, nil, false
+		}
 	}
 	r, ok := resolved[name]
 	if !ok {

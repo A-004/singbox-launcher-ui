@@ -576,9 +576,13 @@ func validateRuleSetRefs(p *Preset, validTags map[string]bool) []PresetWarning {
 		}
 	}
 
-	if p.Rule != nil {
-		if ref, ok := p.Rule["rule_set"]; ok {
-			checkRef("rule", ref)
+	// SPEC 067 Phase 9: preset.rules — slice. Validate refs per rule.
+	for i, rm := range p.Rules {
+		if rm == nil {
+			continue
+		}
+		if ref, ok := rm["rule_set"]; ok {
+			checkRef(fmt.Sprintf("rules[%d]", i), ref)
 		}
 	}
 	if p.DNSRule != nil {

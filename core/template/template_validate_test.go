@@ -243,7 +243,7 @@ func TestIf_BareBoolOnTextVar_LoaderError(t *testing.T) {
 func TestIf_BarePlatform_LoaderError(t *testing.T) {
 	val := `[{
 		"#if": {
-			"and": ["@platform"],
+			"and": ["@runtime.platform"],
 			"value": {"x": 1}
 		}
 	}]`
@@ -282,7 +282,7 @@ func TestIf_LiteralEqOnTextList_LoaderError(t *testing.T) {
 func TestIf_PlatformIn_OK(t *testing.T) {
 	val := `[{
 		"#if": {
-			"and": [{"@platform": {"#in": ["darwin", "linux"]}}],
+			"and": [{"@runtime.platform": {"#in": ["darwin", "linux"]}}],
 			"value": {"x": 1}
 		}
 	}]`
@@ -316,27 +316,86 @@ func TestIf_UnknownBangKey_OnlyWarns(t *testing.T) {
 	}
 }
 
-func TestVars_ReservedName_Platform_LoaderError(t *testing.T) {
-	vars := []TemplateVar{{Name: "platform", Type: "text"}}
+func TestVars_ReservedName_Runtime_LoaderError(t *testing.T) {
+	vars := []TemplateVar{{Name: "runtime", Type: "text"}}
 	err := ValidateWizardTemplate(vars, nil, json.RawMessage(`{}`))
 	if err == nil || !strings.Contains(err.Error(), "reserved") {
 		t.Fatalf("expected reserved-name error, got %v", err)
 	}
 }
 
-func TestVars_ReservedName_Arch_LoaderError(t *testing.T) {
-	vars := []TemplateVar{{Name: "arch", Type: "text"}}
-	err := ValidateWizardTemplate(vars, nil, json.RawMessage(`{}`))
-	if err == nil || !strings.Contains(err.Error(), "reserved") {
-		t.Fatalf("expected reserved-name error, got %v", err)
+func TestVars_FormerReservedNames_NowAllowed(t *testing.T) {
+	// SPEC 067 namespace rename: runtime globals moved under @runtime.*, so
+	// "platform" / "arch" are ordinary var names again — only "runtime" is reserved.
+	vars := []TemplateVar{
+		{Name: "platform", Type: "text"},
+		{Name: "arch", Type: "text"},
+	}
+	if err := ValidateWizardTemplate(vars, nil, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("expected ok for former-reserved platform/arch, got %v", err)
 	}
 }
 
 func TestVars_ReservedName_CamelCase_OK(t *testing.T) {
-	// Case-sensitive: "Platform" is NOT reserved (per SPEC, strict lower-case).
-	vars := []TemplateVar{{Name: "Platform", Type: "text"}}
+	// Case-sensitive: "Runtime" is NOT reserved (strict lower-case).
+	vars := []TemplateVar{{Name: "Runtime", Type: "text"}}
 	if err := ValidateWizardTemplate(vars, nil, json.RawMessage(`{}`)); err != nil {
-		t.Fatalf("expected ok for camelCase Platform, got %v", err)
+		t.Fatalf("expected ok for camelCase Runtime, got %v", err)
+	}
+}
+
+// SPEC 067: #if внутри vars[].default_value — только @runtime.* globals.
+
+func mustDefaultValue(t *testing.T, raw string) VarDefaultValue {
+	t.Helper()
+	var dv VarDefaultValue
+	if err := json.Unmarshal([]byte(raw), &dv); err != nil {
+		t.Fatalf("default_value unmarshal: %v", err)
+	}
+	return dv
+}
+
+func TestDefaultValueIf_RuntimeGlobal_OK(t *testing.T) {
+	vars := []TemplateVar{{
+		Name: "tun_stack", Type: "enum",
+		DefaultValue: mustDefaultValue(t, `{"#if":{"and":[{"@runtime.platform":"windows"},{"@runtime.arch":"386"}],"value":"gvisor","else":"system"}}`),
+	}}
+	if err := ValidateWizardTemplate(vars, nil, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("expected ok for @runtime.* default #if, got %v", err)
+	}
+}
+
+func TestDefaultValueIf_PerPlatformTree_OK(t *testing.T) {
+	vars := []TemplateVar{{
+		Name: "tun_stack", Type: "enum",
+		DefaultValue: mustDefaultValue(t, `{"default":{"#if":{"and":[{"@runtime.platform":"linux"}],"value":"gvisor","else":"system"}}}`),
+	}}
+	if err := ValidateWizardTemplate(vars, nil, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("expected ok for per-platform default #if, got %v", err)
+	}
+}
+
+func TestDefaultValueIf_UserVarRef_LoaderError(t *testing.T) {
+	// Ссылка на user-var внутри default #if запрещена (только @runtime.*).
+	vars := []TemplateVar{
+		{Name: "flag", Type: "bool"},
+		{Name: "tun_stack", Type: "enum",
+			DefaultValue: mustDefaultValue(t, `{"#if":{"and":["@flag"],"value":"gvisor","else":"system"}}`)},
+	}
+	err := ValidateWizardTemplate(vars, nil, json.RawMessage(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "unknown var") {
+		t.Fatalf("expected user-var rejection in default #if, got %v", err)
+	}
+}
+
+func TestDefaultValueIf_UnknownRuntimeGlobal_LoaderError(t *testing.T) {
+	vars := []TemplateVar{{
+		Name: "tun_stack", Type: "enum",
+		DefaultValue: mustDefaultValue(t, `{"#if":{"and":[{"@runtime.bogus":"x"}],"value":"a","else":"b"}}`),
+	}}
+	err := ValidateWizardTemplate(vars, nil, json.RawMessage(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "unknown runtime global") {
+		t.Fatalf("expected unknown-runtime-global error, got %v", err)
 	}
 }
 
@@ -378,15 +437,15 @@ func TestOuterIf_UnknownVar_LoaderError(t *testing.T) {
 }
 
 func TestOuterIf_PlatformGlobal_LoaderError(t *testing.T) {
-	// Runtime globals @platform / @arch live only in #if predicates,
+	// Runtime globals @runtime.* live only in #if predicates,
 	// never in outer if[]/if_or[]. Phase 3 rejects them at load time.
 	vars := []TemplateVar{{Name: "tun", Type: "bool"}}
 	params := []TemplateParam{
-		{Name: "inbounds", If: []string{"@platform"}, Value: json.RawMessage(`[]`)},
+		{Name: "inbounds", If: []string{"@runtime.platform"}, Value: json.RawMessage(`[]`)},
 	}
 	err := ValidateWizardTemplate(vars, params, json.RawMessage(`{}`))
 	if err == nil || !strings.Contains(err.Error(), "runtime global") {
-		t.Fatalf("expected runtime-global error for @platform in outer if[], got %v", err)
+		t.Fatalf("expected runtime-global error for @runtime.platform in outer if[], got %v", err)
 	}
 }
 

@@ -32,7 +32,7 @@ core/template.LoadTemplateData(execDir)
      │   SubstituteVarsInJSON(goos, goarch):
      │     · resolves "@var" placeholders во всём JSON-дереве
      │     · обрабатывает "#if" construct (map-spread + array-element),
-     │       runtime globals @platform / @arch — SPEC 067
+     │       runtime globals @runtime.platform / @runtime.arch — SPEC 067
      │   ParsePresets + filter platforms
      ▼
 model.TemplateData (immutable for session)
@@ -331,4 +331,4 @@ emit, а не stale snapshot.
 | SPECS/056-R-N-DNS_SCHEMA_REDESIGN | Flat `dns_options.servers/rules[]` kind discriminator + Resolver pattern |
 | SPECS/057-R-N-OUTBOUNDS_PRESET_BINDING | Outbound `Ref` + `Updates[]` schema + lifecycle Sync |
 | SPECS/058-R-N-STATE_AS_TEMPLATE_DIFF | State outbounds — thin refs (`#TEMPLATE#`/preset_id) + USER patch (`#USER#`); migration + auto-upgrade |
-| SPECS/067-F-N-TEMPLATE_EXPRESSIONS | `#if` construct (map-spread + array-element) + expression language predicates + runtime globals `@platform`/`@arch` + strict `@`-only var-ref в outer `if[]` |
+| SPECS/067-F-N-TEMPLATE_EXPRESSIONS | `#if` construct (map-spread + array-element) + expression language predicates + runtime globals `@runtime.platform`/`@runtime.arch` + strict `@`-only var-ref в outer `if[]` |

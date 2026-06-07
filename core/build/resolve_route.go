@@ -191,19 +191,22 @@ func resolvePresetRouteRule(
 		emittedTags[tag] = true
 	}
 
-	// Routing rule. Cleanup dangling refs (если remote rule_set skipped).
-	if frags.RoutingRule != nil {
-		cleaned := cleanDanglingRuleSetInRule(frags.RoutingRule, emittedTags)
-		if cleaned != nil {
-			out.Rules = append(out.Rules, ResolvedRouteRule{
-				Body:        cleaned,
-				Source:      RouteSourcePreset,
-				PresetID:    p.ID,
-				PresetLabel: presetLabel,
-				Active:      true, // ExpandPreset уже отфильтровал по if/if_or
-				Enabled:     rule.Enabled,
-			})
+	// Routing rules. Cleanup dangling refs (если remote rule_set skipped).
+	// SPEC 067 Phase 9: каждая rule из frags.RoutingRules эмитится отдельной
+	// ResolvedRouteRule (in-order).
+	for _, rr := range frags.RoutingRules {
+		cleaned := cleanDanglingRuleSetInRule(rr, emittedTags)
+		if cleaned == nil {
+			continue
 		}
+		out.Rules = append(out.Rules, ResolvedRouteRule{
+			Body:        cleaned,
+			Source:      RouteSourcePreset,
+			PresetID:    p.ID,
+			PresetLabel: presetLabel,
+			Active:      true, // ExpandPreset уже отфильтровал по if/if_or
+			Enabled:     rule.Enabled,
+		})
 	}
 }
 

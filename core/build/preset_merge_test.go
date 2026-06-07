@@ -26,7 +26,7 @@ func TestMergePresets_AppendsActivePresetRule(t *testing.T) {
 	presetJSON := `{
 		"id": "private-ips",
 		"label": "Private IPs",
-		"rule": {"ip_is_private": true, "outbound": "direct-out"}
+		"rules": [{"ip_is_private": true, "outbound": "direct-out"}]
 	}`
 	var p template.Preset
 	if err := json.Unmarshal([]byte(presetJSON), &p); err != nil {
@@ -71,7 +71,7 @@ func TestMergePresets_AppendsActivePresetRule(t *testing.T) {
 func TestMergePresets_DisabledPresetRefSkipped(t *testing.T) {
 	raw := json.RawMessage(`{"rules":[],"rule_set":[]}`)
 	ctx := PresetMergeContext{
-		Presets: []template.Preset{{ID: "x", Label: "X", Rule: map[string]interface{}{"ip_is_private": true, "outbound": "direct-out"}}},
+		Presets: []template.Preset{{ID: "x", Label: "X", Rules: []map[string]interface{}{{"ip_is_private": true, "outbound": "direct-out"}}}},
 		Rules: []state.Rule{
 			{Kind: state.RuleKindPreset, Ref: "x", Enabled: false, Body: json.RawMessage(`{"vars":{}}`)},
 		},
@@ -118,7 +118,7 @@ func TestMergePresets_DNSBundledServer(t *testing.T) {
 		"dns_servers": [
 			{"tag": "yandex_udp", "type": "udp", "server": "77.88.8.8", "server_port": 53, "detour": "@out"}
 		],
-		"rule": {"rule_set": "domains", "outbound": "@out"},
+		"rules": [{"rule_set": "domains", "outbound": "@out"}],
 		"dns_rule": {"rule_set": "domains", "server": "@dns_server"}
 	}`
 	var p template.Preset

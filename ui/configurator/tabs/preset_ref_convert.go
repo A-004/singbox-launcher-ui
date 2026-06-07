@@ -38,12 +38,17 @@ func convertPresetRefToUserRules(
 
 	created := 0
 	outbound := ""
-	if frags.RoutingRule != nil {
-		if v, ok := frags.RoutingRule["outbound"].(string); ok {
+	// SPEC 067 Phase 9: preset.rules — slice. Для одно-rule presets берём первый.
+	// Multi-rule presets (split-all-traffic) — также используем первую entry для
+	// определения outbound; legacy convert path не претендует на полное one-to-one
+	// mapping для multi-rule presets (юзер увидит один user-rule, не два).
+	firstRule := firstNonNilRule(frags.RoutingRules)
+	if firstRule != nil {
+		if v, ok := firstRule["outbound"].(string); ok {
 			outbound = v
-		} else if act, ok := frags.RoutingRule["action"].(string); ok && act == "reject" {
+		} else if act, ok := firstRule["action"].(string); ok && act == "reject" {
 			// Map reject action → outbound literal "reject" (SPEC 053 contract).
-			method, _ := frags.RoutingRule["method"].(string)
+			method, _ := firstRule["method"].(string)
 			if method == "drop" {
 				outbound = "drop"
 			} else {
@@ -99,27 +104,59 @@ func convertPresetRefToUserRules(
 		return created
 	}
 
-	// Без rule_set'ов — inline match прямо в preset.rule (Private IPs / BitTorrent / etc).
-	if frags.RoutingRule != nil {
-		match := make(map[string]interface{}, len(frags.RoutingRule))
-		for k, v := range frags.RoutingRule {
+	// Без rule_set'ов — inline match прямо в preset.rules[] (Private IPs / BitTorrent / etc).
+	// SPEC 067 Phase 9: эмитим по одному user-rule per entry из frags.RoutingRules.
+	for idx, rr := range frags.RoutingRules {
+		if rr == nil {
+			continue
+		}
+		// Per-rule outbound — если у конкретной rule есть свой outbound/action,
+		// используем его (multi-rule preset как split-all-traffic — каждая
+		// rule имеет свой outbound).
+		ruleOutbound := outbound
+		if v, ok := rr["outbound"].(string); ok && v != "" {
+			ruleOutbound = v
+		} else if act, ok := rr["action"].(string); ok && act == "reject" {
+			method, _ := rr["method"].(string)
+			if method == "drop" {
+				ruleOutbound = "drop"
+			} else {
+				ruleOutbound = "reject"
+			}
+		}
+		match := make(map[string]interface{}, len(rr))
+		for k, v := range rr {
 			if k == "outbound" || k == "action" || k == "method" {
 				continue
 			}
 			match[k] = v
 		}
+		label := tplPreset.Label
+		if len(frags.RoutingRules) > 1 {
+			label = fmt.Sprintf("%s [%d]", tplPreset.Label, idx+1)
+		}
 		cr := wizardmodels.RuleState{
 			Rule: wizardtemplate.TemplateSelectableRule{
-				Label: tplPreset.Label,
-				Rule:  applyOutboundToMatchMap(match, outbound),
+				Label: label,
+				Rule:  applyOutboundToMatchMap(match, ruleOutbound),
 			},
 			Enabled:          enabled,
-			SelectedOutbound: outbound,
+			SelectedOutbound: ruleOutbound,
 		}
 		model.CustomRules = append(model.CustomRules, &cr)
 		created++
 	}
 	return created
+}
+
+// firstNonNilRule — helper: возвращает первый не-nil rule из slice.
+func firstNonNilRule(rules []map[string]interface{}) map[string]interface{} {
+	for _, r := range rules {
+		if r != nil {
+			return r
+		}
+	}
+	return nil
 }
 
 // extractFirstRule — берёт первое entry из rule_set.rules[].

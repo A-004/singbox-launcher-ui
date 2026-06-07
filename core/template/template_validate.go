@@ -10,18 +10,18 @@ import (
 	"singbox-launcher/internal/debuglog"
 )
 
-// reservedRuntimeGlobalNames — var-имена, конфликтующие с runtime-globals (SPEC 067).
-// Strict lower-case (`platform` / `arch`) — те же значения, что выдаёт runtime.GOOS / runtime.GOARCH.
-var reservedRuntimeGlobalNames = map[string]struct{}{
-	"platform": {},
-	"arch":     {},
+// reservedVarNames — имена vars[].name, зарезервированные движком (SPEC 067).
+// "runtime" — namespace runtime-globals (@runtime.platform / @runtime.arch);
+// объявлять var с таким именем нельзя. Strict lower-case.
+var reservedVarNames = map[string]struct{}{
+	"runtime": {},
 }
 
 // validateOuterIfRefs проверяет элементы outer params[].if / if_or, vars[].if / if_or,
 // presets[].if / if_or. Per SPEC 067 Phase 3:
 //   - элемент должен начинаться с "@" → strip и lookup в varByName (type=bool).
 //   - bare элемент (legacy) → loader error с указанием канонической формы.
-//   - runtime globals (`@platform` / `@arch`) запрещены в outer if[] (только #if).
+//   - runtime globals (`@runtime.platform` / `@runtime.arch`) запрещены в outer if[] (только #if).
 func validateOuterIfRefs(ctx string, ifNames, ifOrNames []string, varByName map[string]TemplateVar) error {
 	if len(ifNames) > 0 && len(ifOrNames) > 0 {
 		return fmt.Errorf("%s: if and if_or cannot both be set", ctx)
@@ -44,7 +44,7 @@ func validateOuterIfList(ctx string, names []string, varByName map[string]Templa
 		if name == "" {
 			return fmt.Errorf("%s: empty var-ref after @", ctx)
 		}
-		if _, reserved := reservedRuntimeGlobalNames[name]; reserved {
+		if isRuntimeGlobalRef(name) {
 			return fmt.Errorf("%s: runtime global %q is not allowed in outer if[]/if_or[] (only inside #if predicates)", ctx, raw)
 		}
 		vd, ok := varByName[name]
@@ -85,8 +85,8 @@ func ValidateWizardTemplate(vars []TemplateVar, params []TemplateParam, config j
 		if _, dup := names[nm]; dup {
 			return fmt.Errorf("vars: duplicate name %q", nm)
 		}
-		if _, reserved := reservedRuntimeGlobalNames[nm]; reserved {
-			return fmt.Errorf("template: vars[].name %q is reserved (runtime global); rename", nm)
+		if _, reserved := reservedVarNames[nm]; reserved {
+			return fmt.Errorf("template: vars[].name %q is reserved (runtime global namespace); rename", nm)
 		}
 		names[nm] = struct{}{}
 		varByName[nm] = v
@@ -97,7 +97,12 @@ func ValidateWizardTemplate(vars []TemplateVar, params []TemplateParam, config j
 		if err := validateOuterIfRefs(ctx, v.If, v.IfOr, varByName); err != nil {
 			return err
 		}
-		// vars[].default_value is plain string / per-platform string map — no #if possible.
+		// vars[].default_value может содержать #if (SPEC 067) — но только с
+		// @runtime.* globals (user-var refs запрещены: на этапе resolve дефолтов
+		// другие vars ещё не разрешены, порядок не гарантирован).
+		if err := validateDefaultValueIf(v.DefaultValue, ctx); err != nil {
+			return err
+		}
 	}
 
 	for i, p := range params {
@@ -106,7 +111,7 @@ func ValidateWizardTemplate(vars []TemplateVar, params []TemplateParam, config j
 			return err
 		}
 		// Validate #if constructs first — they have more specific errors than
-		// the generic placeholder check (e.g. bare "@platform" in #if predicate).
+		// the generic placeholder check (e.g. bare "@runtime.platform" in #if predicate).
 		if err := validateIfConstruct(p.Value, varByName, ctx+".value"); err != nil {
 			return err
 		}
@@ -115,7 +120,7 @@ func ValidateWizardTemplate(vars []TemplateVar, params []TemplateParam, config j
 			return fmt.Errorf("params[%d].value: %w", i, err)
 		}
 		for _, ref := range refs {
-			if _, reserved := reservedRuntimeGlobalNames[ref]; reserved {
+			if isRuntimeGlobalRef(ref) {
 				continue
 			}
 			if _, ok := names[ref]; !ok {
@@ -245,6 +250,33 @@ func validateIfConstruct(rawValue json.RawMessage, varByName map[string]Template
 	return walkValidateIf(v, varByName, context)
 }
 
+// validateDefaultValueIf валидирует #if внутри vars[].default_value. Передаём
+// ПУСТОЙ varByName — это запрещает любые ссылки на user-vars (они резолвятся как
+// "unknown var"); разрешены только @runtime.* globals. См. SPEC 067.
+//
+// Два размещения:
+//   - top-level: default_value == {"#if": {...}};
+//   - per-platform: {"win7": {"#if": {...}}, "default": "..."} — значение ключа = дерево.
+func validateDefaultValueIf(dv VarDefaultValue, ctx string) error {
+	if len(dv.PerPlatform) == 0 {
+		return nil
+	}
+	emptyVars := map[string]TemplateVar{}
+	if body, ok := dv.PerPlatform["#if"]; ok && len(dv.PerPlatform) == 1 {
+		return validateIfBody(body, emptyVars, ctx+".default_value.#if")
+	}
+	for k, node := range dv.PerPlatform {
+		tree, ok := node.(map[string]interface{})
+		if !ok {
+			continue // обычное строковое значение
+		}
+		if err := walkValidateIf(tree, emptyVars, fmt.Sprintf("%s.default_value[%s]", ctx, k)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func walkValidateIf(v interface{}, varByName map[string]TemplateVar, context string) error {
 	switch x := v.(type) {
 	case map[string]interface{}:
@@ -352,7 +384,7 @@ func validateIfBody(raw interface{}, varByName map[string]TemplateVar, ctx strin
 func validateIfPredicate(p interface{}, varByName map[string]TemplateVar, ctx string) error {
 	switch pv := p.(type) {
 	case string:
-		// Bare "@var" — bool template var; @platform / @arch не разрешены в bare form.
+		// Bare "@var" — bool template var; @runtime.* не разрешены в bare form.
 		if !strings.HasPrefix(pv, "@") {
 			return fmt.Errorf("%s: bare predicate %q must start with @", ctx, pv)
 		}
@@ -360,7 +392,7 @@ func validateIfPredicate(p interface{}, varByName map[string]TemplateVar, ctx st
 		if name == "" {
 			return fmt.Errorf("%s: empty var name after @", ctx)
 		}
-		if _, reserved := reservedRuntimeGlobalNames[name]; reserved {
+		if isRuntimeGlobalRef(name) {
 			return fmt.Errorf("%s: runtime global %q is not allowed in bare form (not bool); use {%q: ...}", ctx, pv, pv)
 		}
 		vd, ok := varByName[name]
@@ -400,10 +432,13 @@ func validateIfPredicate(p interface{}, varByName map[string]TemplateVar, ctx st
 
 // validateVarPredicateRHS — dispatch по RHS для {"@var": <rhs>} predicates.
 func validateVarPredicateRHS(varName string, rhs interface{}, varByName map[string]TemplateVar, ctx string) error {
-	// Resolve var type. Globals @platform / @arch are always text-like.
+	// Resolve var type. Globals @runtime.* are always text-like.
 	var varType string
 	isRuntimeGlobal := false
-	if _, reserved := reservedRuntimeGlobalNames[varName]; reserved {
+	if isRuntimeGlobalRef(varName) {
+		if !isKnownRuntimeGlobal(varName) {
+			return fmt.Errorf("%s: unknown runtime global @%s (known: @runtime.platform, @runtime.arch)", ctx, varName)
+		}
 		isRuntimeGlobal = true
 		varType = "text"
 	} else {

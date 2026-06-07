@@ -7,7 +7,7 @@ import (
 )
 
 func TestVarDefaultValueForPlatform_win7AndOther(t *testing.T) {
-	v := VarDefaultValue{PerPlatform: map[string]string{"win7": "gvisor", "default": "system"}}
+	v := VarDefaultValue{PerPlatform: map[string]interface{}{"win7": "gvisor", "default": "system"}}
 	if got := v.ForPlatform("windows", "386"); got != "gvisor" {
 		t.Fatalf("windows/386: %q", got)
 	}

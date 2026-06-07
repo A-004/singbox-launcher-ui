@@ -1004,7 +1004,7 @@ singbox-launcher/
   - `GetDefaultOutbound()` - извлечение outbound по умолчанию из правила
   - `CloneRuleRaw()` - глубокое копирование правила (map[string]interface{})
 - `substitute.go` (SPEC 067):
-  - `SubstituteVarsInJSON(data, vars, resolved, goos, goarch)` — recursive `@var` substitution + walker для control-construct `#if` (map-spread и array-element режимы); параметры `goos` / `goarch` нужны для runtime globals `@platform` / `@arch` в predicates
+  - `SubstituteVarsInJSON(data, vars, resolved, goos, goarch)` — recursive `@var` substitution + walker для control-construct `#if` (map-spread и array-element режимы); параметры `goos` / `goarch` нужны для runtime globals `@runtime.platform` / `@runtime.arch` в predicates
   - `handleIfMapSpread()` / `handleIfArrayElement()` / `selectIfBranch()` — два режима размещения `#if`
   - `evaluatePredicate()` / `evaluateVarPredicateRHS()` — 8 форм predicate'ов (bare bool, equality, `#notEmpty`/`#isEmpty`, `#in`/`#notIn`, `#matches`, `#not`); short-circuit AND/OR
   - Неизвестные `#*` ключи — warn + drop (forward-compat для будущих constructs)
@@ -1012,7 +1012,9 @@ singbox-launcher/
   - `ValidateWizardTemplate()` — главная точка валидации (uniqueness, refs, type-check, `#if` body, outer `@`-only)
   - `validateOuterIfRefs()` / `validateOuterIfList()` — strict `@`-prefix на каждом элементе `params[].if` / `if_or`, `vars[].if` / `if_or`, `presets[].if` / `if_or`; bare → loader error
   - `validateIfConstruct()` / `validateIfBody()` / `validateIfPredicate()` — type-checked walk дерева value, валидация `#if` (and/or mutual exclusion, value required, predicate forms, regex compile)
-  - `reservedRuntimeGlobalNames` (`platform` / `arch`) — collision с runtime globals в `vars[].name` → loader error
+  - `validateDefaultValueIf()` — `#if` в `vars[].default_value` (только `@runtime.*`, пустой `varByName` запрещает user-var refs)
+  - `reservedVarNames` (`runtime`) — collision с namespace runtime-globals `@runtime.*` в `vars[].name` → loader error
+  - `isRuntimeGlobalRef()` / `isKnownRuntimeGlobal()` — namespace `@runtime.*` (поля `platform` / `arch`); резолв в `lookupVarScalar` (substitute.go)
 
 **utils/** - Утилиты
 - `comparison.go`:

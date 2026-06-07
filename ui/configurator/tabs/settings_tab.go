@@ -78,13 +78,16 @@ func templateVarUsedInAnotherVarConditional(td *wizardtemplate.TemplateData, nam
 		return false
 	}
 	for _, v := range td.Vars {
+		// If/IfOr entries are canonical "@name" (SPEC 067 Phase 3); changedName is
+		// the bare var name. Strip the @ before comparing, else the refresh trigger
+		// never fires and dependent rows stay frozen on toggle.
 		for _, x := range v.If {
-			if x == name {
+			if strings.TrimPrefix(x, "@") == name {
 				return true
 			}
 		}
 		for _, x := range v.IfOr {
-			if x == name {
+			if strings.TrimPrefix(x, "@") == name {
 				return true
 			}
 		}

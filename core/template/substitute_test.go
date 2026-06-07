@@ -336,7 +336,7 @@ func TestIf_Predicate_Not_DoubleNegation(t *testing.T) {
 	}
 }
 
-// Runtime globals (@platform, @arch) ----------------------------------------
+// Runtime globals (@runtime.platform, @runtime.arch) ------------------------
 
 func TestIf_Predicate_Platform_In(t *testing.T) {
 	cases := []struct {
@@ -348,7 +348,7 @@ func TestIf_Predicate_Platform_In(t *testing.T) {
 		{"windows", "default"},
 	}
 	for _, tc := range cases {
-		body := `{"x":"default","#if":{"and":[{"@platform":{"#in":["darwin","linux"]}}],"value":{"x":"matched"}}}`
+		body := `{"x":"default","#if":{"and":[{"@runtime.platform":{"#in":["darwin","linux"]}}],"value":{"x":"matched"}}}`
 		m := substituteHelper(t, nil, map[string]ResolvedVar{}, body, tc.goos, "amd64")
 		if m["x"] != tc.want {
 			t.Fatalf("goos=%q got x=%v want %s", tc.goos, m["x"], tc.want)
@@ -365,7 +365,7 @@ func TestIf_Predicate_Arch_Equality(t *testing.T) {
 		{"amd64", "default"},
 	}
 	for _, tc := range cases {
-		body := `{"x":"default","#if":{"and":[{"@arch":"386"}],"value":{"x":"matched"}}}`
+		body := `{"x":"default","#if":{"and":[{"@runtime.arch":"386"}],"value":{"x":"matched"}}}`
 		m := substituteHelper(t, nil, map[string]ResolvedVar{}, body, "windows", tc.goarch)
 		if m["x"] != tc.want {
 			t.Fatalf("goarch=%q got x=%v want %s", tc.goarch, m["x"], tc.want)
@@ -374,11 +374,11 @@ func TestIf_Predicate_Arch_Equality(t *testing.T) {
 }
 
 // TestIf_Predicate_Platform_BareString_Defensive — Phase 1 walker treats bare
-// "@platform" / "@arch" in and[] as false (validator catches at load in Phase 2).
+// "@runtime.*" in and[] as false (validator catches at load in Phase 2).
 func TestIf_Predicate_Platform_BareString_Defensive(t *testing.T) {
-	body := `{"x":"default","#if":{"and":["@platform"],"value":{"x":"matched"}}}`
+	body := `{"x":"default","#if":{"and":["@runtime.platform"],"value":{"x":"matched"}}}`
 	m := substituteHelper(t, nil, map[string]ResolvedVar{}, body, "darwin", "amd64")
 	if m["x"] != "default" {
-		t.Fatalf("bare @platform predicate should be defensive-false; got x=%v", m["x"])
+		t.Fatalf("bare @runtime.platform predicate should be defensive-false; got x=%v", m["x"])
 	}
 }

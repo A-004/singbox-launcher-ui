@@ -103,8 +103,8 @@ func BuildRulesAndDNS(
 				continue
 			}
 			mergeRuleSets(&result, ruleSetSeen, frags.RuleSets)
-			if frags.RoutingRule != nil {
-				result.RouteRules = append(result.RouteRules, frags.RoutingRule)
+			for _, rr := range frags.RoutingRules {
+				result.RouteRules = append(result.RouteRules, rr)
 			}
 			if frags.DNSRule != nil {
 				result.DNSRules = append(result.DNSRules, frags.DNSRule)

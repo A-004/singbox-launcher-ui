@@ -82,7 +82,7 @@ func TestPipeline_PresetRef(t *testing.T) {
 			{"tag": "domains", "type": "inline", "format": "domain_suffix",
 			 "rules": [{"domain_suffix": ["ru"]}]}
 		],
-		"rule": {"rule_set": "domains", "outbound": "@out"}
+		"rules": [{"rule_set": "domains", "outbound": "@out"}]
 	}`)}
 	state := &state.State{
 		Rules: []state.Rule{makeTestRule(t, state.RuleKindPreset, "ru-direct-mini", "", true, `{"vars":{}}`)},
@@ -123,7 +123,7 @@ func TestPipeline_BrokenPresetRef(t *testing.T) {
 func TestPipeline_DisabledPresetRef(t *testing.T) {
 	presets := []template.Preset{makeTestPreset(t, `{
 		"id": "x", "label": "X",
-		"rule": {"ip_is_private": true, "outbound": "direct-out"}
+		"rules": [{"ip_is_private": true, "outbound": "direct-out"}]
 	}`)}
 	state := &state.State{
 		Rules: []state.Rule{makeTestRule(t, state.RuleKindPreset, "x", "", false, `{"vars":{}}`)},
@@ -267,7 +267,7 @@ func TestPipeline_UserServersAndRules(t *testing.T) {
 func TestPipeline_MixedKinds(t *testing.T) {
 	presets := []template.Preset{makeTestPreset(t, `{
 		"id": "private-ips", "label": "Private IPs",
-		"rule": {"ip_is_private": true, "outbound": "direct-out"}
+		"rules": [{"ip_is_private": true, "outbound": "direct-out"}]
 	}`)}
 	state := &state.State{
 		Rules: []state.Rule{
@@ -299,7 +299,7 @@ func TestPipeline_DuplicateTagFirstWins(t *testing.T) {
 	p1 := makeTestPreset(t, `{
 		"id": "a",
 		"rule_set": [{"tag": "shared", "type": "inline", "rules": [{"domain_suffix": ["x"]}]}],
-		"rule": {"rule_set": "shared", "outbound": "direct-out"}
+		"rules": [{"rule_set": "shared", "outbound": "direct-out"}]
 	}`)
 	// два разных preset'а в разных prefix'ах не создают конфликт по tag —
 	// они эмитят `a:shared` и `b:shared` (разные). Так что тест на конфликт
