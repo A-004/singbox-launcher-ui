@@ -502,5 +502,140 @@ func CleanupGhostSingboxTunAdapters(mode GhostTunCleanupMode) (removed int, err 
 	}
 
 	debuglog.WarnLog("ghost-tun cleanup: done scanned=%d removed=%d skipped=%d", scanned, removed, skipped)
+
+	// Phase 2: NLA profile / signature cleanup. Independent of OS gate —
+	// these registry entries accumulate on every Windows version when
+	// sing-box tunnels come and go, and Windows never garbage-collects
+	// them. Failing to clean these is what makes "Choose Network Location"
+	// dialogs show "singbox-tun0 16", "...17", "...18" forever even after
+	// we've fixed adapter accumulation. See cleanupNLAProfiles for the
+	// match-by-Description-"singbox-tun0" safety story.
+	pRemoved, sRemoved := cleanupNLAProfiles()
+	if pRemoved > 0 || sRemoved > 0 {
+		debuglog.WarnLog("ghost-tun cleanup: NLA done profiles=%d signatures=%d", pRemoved, sRemoved)
+	}
+
 	return removed, nil
+}
+
+// cleanupNLAProfiles removes Network Location Awareness profile +
+// signature records left behind by destroyed singbox-tun adapters.
+//
+// Windows creates an NLA profile every time a new network is detected
+// and NEVER garbage-collects them, even after the adapter goes away. A
+// user with N start/stop cycles of sing-box accumulates N profile keys
+// like:
+//
+//	HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles\{GUID}
+//	  ProfileName = "singbox-tun0", "singbox-tun0  2", ..., "singbox-tun0  N"
+//	  Description = "singbox-tun0"  ← ours, identification key
+//
+// Plus a matching entry per profile in
+// `\NetworkList\Signatures\Unmanaged\<hash>` keyed by `ProfileGuid`. The
+// "singbox-tun0 N" suffix increments forever because NLA dedups by
+// ProfileName against the cached list. Without this cleanup, even after
+// we fix device-node accumulation, the Choose Network Location dialog
+// keeps showing fresh dedup numbers and the registry growth is monotonic.
+//
+// Match policy: registry value `Description == "singbox-tun0"` (the
+// launcher-set adapter name, NOT the dedup-suffixed `ProfileName`).
+// We only ever touch profiles we created. Other applications' profiles
+// have their own Description string and are skipped.
+//
+// Returns (profilesRemoved, signaturesRemoved). All errors are logged at
+// WarnLog and never propagated — the cleanup must never affect VPN
+// behavior. Cross-version safe: no Win7 gate.
+//
+// Note: `registry.DeleteKey` deletes the value-only key; NLA profile and
+// signature subkeys do not contain nested subkeys in practice (verified
+// via the user-supplied .reg export), so a single-step delete is
+// sufficient. If a future Windows version adds nested keys, the delete
+// would fail with ERROR_KEY_HAS_CHILDREN and we'd log + skip — safe
+// degradation.
+func cleanupNLAProfiles() (profilesRemoved, signaturesRemoved int) {
+	const adapterDescription = "singbox-tun0"
+
+	// Phase A: enumerate Profiles, collect GUIDs of matching entries,
+	// delete profile keys. We collect first then delete because deleting
+	// a key while iterating ReadSubKeyNames is a fast path to undefined
+	// behavior; collect-then-delete is the conservative pattern.
+	const profilesPath = `SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Profiles`
+	profKey, err := registry.OpenKey(registry.LOCAL_MACHINE, profilesPath,
+		registry.ENUMERATE_SUB_KEYS|registry.READ|registry.WRITE)
+	if err != nil {
+		debuglog.WarnLog("nla cleanup: open Profiles: %v", err)
+		return 0, 0
+	}
+	defer profKey.Close()
+
+	subNames, err := profKey.ReadSubKeyNames(-1)
+	if err != nil {
+		debuglog.WarnLog("nla cleanup: enumerate Profiles: %v", err)
+		return 0, 0
+	}
+
+	// Matched-GUIDs set for Signatures cross-reference (case-preserving:
+	// Windows stores GUIDs with mixed case, ProfileGuid value matches
+	// subkey name exactly).
+	matchedGUIDs := make(map[string]bool, len(subNames))
+
+	for _, name := range subNames {
+		// Open with READ to check Description.
+		sub, err := registry.OpenKey(profKey, name, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		desc, _, err := sub.GetStringValue("Description")
+		sub.Close()
+		if err != nil || desc != adapterDescription {
+			continue
+		}
+		// Delete subkey via the parent (DeleteKey takes the parent + relative name).
+		if delErr := registry.DeleteKey(profKey, name); delErr != nil {
+			debuglog.WarnLog("nla cleanup: delete profile %q: %v", name, delErr)
+			continue
+		}
+		matchedGUIDs[name] = true
+		profilesRemoved++
+	}
+
+	if len(matchedGUIDs) == 0 {
+		return profilesRemoved, 0
+	}
+
+	// Phase B: enumerate Signatures\Unmanaged, delete entries whose
+	// ProfileGuid value matches one of the just-deleted profiles.
+	const sigPath = `SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Signatures\Unmanaged`
+	sigKey, err := registry.OpenKey(registry.LOCAL_MACHINE, sigPath,
+		registry.ENUMERATE_SUB_KEYS|registry.READ|registry.WRITE)
+	if err != nil {
+		debuglog.WarnLog("nla cleanup: open Signatures: %v", err)
+		return profilesRemoved, 0
+	}
+	defer sigKey.Close()
+
+	sigSubs, err := sigKey.ReadSubKeyNames(-1)
+	if err != nil {
+		debuglog.WarnLog("nla cleanup: enumerate Signatures: %v", err)
+		return profilesRemoved, 0
+	}
+
+	for _, name := range sigSubs {
+		sub, err := registry.OpenKey(sigKey, name, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		guid, _, err := sub.GetStringValue("ProfileGuid")
+		sub.Close()
+		if err != nil || !matchedGUIDs[guid] {
+			continue
+		}
+		if delErr := registry.DeleteKey(sigKey, name); delErr != nil {
+			debuglog.WarnLog("nla cleanup: delete signature %q: %v", name, delErr)
+			continue
+		}
+		signaturesRemoved++
+	}
+
+	return profilesRemoved, signaturesRemoved
 }
