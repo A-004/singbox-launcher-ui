@@ -241,6 +241,29 @@ func (ac *AppController) RebuildConfigIfDirty(forced ...bool) error {
 	return nil
 }
 
+// CleanOrphanRuleSets removes bin/rule-sets/*.srs files not referenced by ANY
+// saved wizard state — the same multi-stage live-set the rebuild GC (Step 5.5)
+// uses. Returns the removed filenames.
+//
+// Used by the manual "clean unused rule-sets" action and the state-delete path
+// (deleting a saved state frees the .srs only that state referenced). Multi-stage
+// semantics are intentional: an .srs stays while ANY saved state still uses it.
+//
+// Conservative on template-load failure: returns the error WITHOUT deleting, so a
+// transient template read can never wipe still-referenced preset .srs files.
+func (ac *AppController) CleanOrphanRuleSets() ([]string, error) {
+	if ac == nil || ac.FileService == nil {
+		return nil, fmt.Errorf("CleanOrphanRuleSets: controller not initialized")
+	}
+	execDir := ac.FileService.ExecDir
+	td, err := template.LoadTemplateData(execDir)
+	if err != nil {
+		return nil, fmt.Errorf("CleanOrphanRuleSets: load template: %w", err)
+	}
+	known := collectAllStageRuleSetTags(execDir, td)
+	return services.DeleteOrphanRuleSets(execDir, known)
+}
+
 // cleanupLegacyOutboundsCache удаляет `bin/outbounds.cache.json`, если он
 // существует (legacy SPEC 045 cache, выпиленный в SPEC 052). One-shot:
 // файл не пересоздаётся новым кодом, поэтому достаточно удалить однажды

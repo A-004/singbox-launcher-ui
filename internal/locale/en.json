@@ -151,6 +151,8 @@
   "diag.cancel": "Cancel",
   "diag.open_log_window": "Log window",
   "diag.open_logs_folder": "Logs folder",
+  "diag.clean_rulesets": "Clean unused rule-sets",
+  "diag.clean_rulesets_done": "Removed %d unused rule-set file(s).",
   "diag.traffic_profiler": "Traffic Profiler",
   "diag.ip_check_services": "IP Check Services:",
   "diag.open_browser": "Open in browser",
