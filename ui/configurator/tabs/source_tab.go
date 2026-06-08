@@ -403,14 +403,20 @@ func CreateSourcesTab(presenter *wizardpresentation.WizardPresenter) fyne.Canvas
 				// (стандартный VBox / Border даёт ~12px воздуха, slишком много).
 				var rowInner fyne.CanvasObject = titleRow
 				if isSubscription {
-					subtitle := formatSourceSubtitle(meta, srcPtr.Update, m.Defaults.Reload)
-					if subtitle != "" {
+					lines := []fyne.CanvasObject{titleRow}
+					if subtitle := formatSourceSubtitle(meta, srcPtr.Update, m.Defaults.Reload); subtitle != "" {
 						subtitleText := canvas.NewText(subtitle, theme.PlaceHolderColor())
 						subtitleText.TextSize = theme.CaptionTextSize()
 						leftPad := canvas.NewRectangle(color.Transparent)
 						leftPad.SetMinSize(fyne.NewSize(48, 0))
-						subtitleRow := container.NewBorder(nil, nil, leftPad, nil, subtitleText)
-						rowInner = container.New(tightVBox{}, titleRow, subtitleRow)
+						lines = append(lines, container.NewBorder(nil, nil, leftPad, nil, subtitleText))
+					}
+					// SPEC 069 feature: provider support / web-page link (icon + URL).
+					if supportRow := supportLinkForMeta(meta); supportRow != nil {
+						lines = append(lines, supportRow)
+					}
+					if len(lines) > 1 {
+						rowInner = container.New(tightVBox{}, lines...)
 					}
 				}
 
