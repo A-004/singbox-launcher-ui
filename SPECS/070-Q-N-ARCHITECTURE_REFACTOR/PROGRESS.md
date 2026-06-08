@@ -3,7 +3,46 @@
 > Обновляется по ходу работы. Источник правды о том, что сделано и что осталось.
 > Стартовая точка: HEAD `f9f2d06`, ветка `develop`, дерево чистое.
 
-## Текущая фаза: **Stage F-UI — UI monolith splits (workflow running)**
+## СТАТУС: основные стадии завершены ✅ (dual-state отложен, см. ниже)
+
+### Финальная верификация
+- `go build ./...` ✅ · `go vet ./...` ✅ · `go test ./...` → **29 пакетов ok, 0 FAIL**.
+- gofmt: всё дерево чисто (0 dirty; было 54).
+- deadcode: 15 (14 pre-existing build-tag/cgo-false-positives + intentional API;
+  +1 = намеренный `GetControllerOrPanic` per ADR-070-7).
+- Бинарник пересобран и установлен в `/Applications/singbox-launcher.app` (13:52).
+
+### Коммиты (на `develop`, НЕ запушено)
+1. `ffb6f7a` plan; `acaae74`/`d1c4f53` P1 safe fixes
+2. `e09749e` Stage A — event-bus + DI cleanup
+3. `7a3a1de` Stage B — dedup
+4. `6e77d96` Stage C — domain monolith splits
+5. `6c82137` Stage D — outbound_generator split (golden-verified)
+6. `c0d555c` Stage F-UI — UI monolith splits
+7. `5f6fc60` Stage E — core lifecycle dedup/split + ConfigBuilt event-wiring
+8. `3fe5741` docs — ARCHITECTURE.md rewrite + per-package inventory
+9. `<gofmt sweep>` + `<this>` final
+
+### ⚠️ UI-изменения — НУЖЕН твой смоук-тест
+1. **Source delete → кнопка Save загорается** (раньше не помечалось dirty). Проверить:
+   удалить источник → Save активна.
+2. **Config-status label обновляется через events.ConfigBuilt** (раньше — прямой
+   callback). Проверить: после Save/Rebuild/Update подписок строка статуса конфига
+   (имя файла + дата + «Xm ago») всё ещё обновляется.
+3. Tooltip-дедуп (`SetToolTipSafe`) и UI-сплиты — без видимых изменений (тот же UI).
+
+### Отложено + задокументировано (designed targets, ADR в ARCHITECTURE.md)
+- **dual-state elimination** (ADR-070-2) — риск тихого повреждения state; эволюционировал
+  через 4 SPEC; нужен runtime-verify. Не делал вслепую.
+- **controller field-extraction** (ADR-070-7) — 113 полей/4 mutex, риск дедлоков.
+- **полный callback→event retirement** (ADR-070-3) — нужен GUI-smoke; сделан только
+  ConfigBuilt-кусок.
+- JSONBuilder rewrite (golden-gated), transport/tls unification (golden-gated).
+
+---
+
+## История стадий (новее → старше)
+## ~~Stage F-UI — UI monolith splits~~ ✅
 
 ### Лог стадий (новее → старше)
 - ✅ **Stage D** — `6c82137`. outbound_generator.go (1086→688) → outbound_validity.go +
