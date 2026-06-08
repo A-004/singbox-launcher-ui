@@ -138,8 +138,11 @@ func buildSingleDNSUserRuleRow(
 		downBtn.Disable()
 	}
 
-	leftLead := container.NewHBox(upBtn, downBtn, fynewidget.CheckLeadingWrap(enableCh))
-	right := container.NewHBox(editBtn, delBtn)
+	leftLead := container.NewHBox(
+		container.New(tightHBox{spacing: rowIconGap}, upBtn, downBtn),
+		fynewidget.CheckLeadingWrap(enableCh),
+	)
+	right := container.New(tightHBox{spacing: rowIconGap}, editBtn, delBtn)
 	rowInner := container.NewBorder(nil, nil, leftLead, right, label)
 	row = fynewidget.NewHoverRow(rowInner, fynewidget.HoverRowConfig{})
 	row.WireTooltipLabelHover(label)
@@ -241,7 +244,10 @@ func buildSingleDNSPresetRuleRow(
 		downBtn.Disable()
 	}
 
-	leftLead := container.NewHBox(upBtn, downBtn, fynewidget.CheckLeadingWrap(enableCh))
+	leftLead := container.NewHBox(
+		container.New(tightHBox{spacing: rowIconGap}, upBtn, downBtn),
+		fynewidget.CheckLeadingWrap(enableCh),
+	)
 	right := container.NewHBox(viewBtn)
 	rowInner := container.NewBorder(nil, nil, leftLead, right, titleLabel)
 	row = fynewidget.NewHoverRow(rowInner, fynewidget.HoverRowConfig{})

@@ -322,8 +322,15 @@ func buildSingleCustomRuleRow(
 	}
 	guiState.RuleOutboundSelects = append(guiState.RuleOutboundSelects, customRuleWidget)
 
-	leftLead := container.NewHBox(moveUpButton, moveDownButton, fynewidget.CheckLeadingWrap(checkbox))
-	rightCluster := container.NewHBox(editButton, deleteButton, outboundWidget)
+	// Pack the reorder arrows and the edit/delete icons tight (tightHBox with a
+	// negative gap); checkbox keeps its leading wrap and the outbound select
+	// stays separated with normal HBox padding.
+	arrowsCluster := container.New(tightHBox{spacing: rowIconGap}, moveUpButton, moveDownButton)
+	leftLead := container.NewHBox(arrowsCluster, fynewidget.CheckLeadingWrap(checkbox))
+	rightCluster := container.NewHBox(
+		container.New(tightHBox{spacing: rowIconGap}, editButton, deleteButton),
+		outboundWidget,
+	)
 
 	labelTap := fynewidget.NewTapWrap(label, func() {
 		if checkbox.Disabled() {

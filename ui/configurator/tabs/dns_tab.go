@@ -146,7 +146,10 @@ func CreateDNSTab(presenter *wizardpresentation.WizardPresenter) fyne.CanvasObje
 						presenter.RefreshDNSListAndSelects()
 					}, rowGetter)
 					delBtn.Importance = widget.LowImportance
-					right = container.NewHBox(editBtn, delBtn, rowGutter)
+					right = container.NewHBox(
+						container.New(tightHBox{spacing: rowIconGap}, editBtn, delBtn),
+						rowGutter,
+					)
 				}
 				// Border: check left, content center (tap/hover → check via fynewidget), buttons right — avoids zero-width label in HBox-only row.
 				rowInner := container.NewBorder(nil, nil, cwc.CheckLeading, right, cwc.Content)
