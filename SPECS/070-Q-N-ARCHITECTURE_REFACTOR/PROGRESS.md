@@ -3,7 +3,49 @@
 > Обновляется по ходу работы. Источник правды о том, что сделано и что осталось.
 > Стартовая точка: HEAD `f9f2d06`, ветка `develop`, дерево чистое.
 
-## Текущая фаза: **P0 — Инспекция**
+## Текущая фаза: **Stage B — behavior-preserving dedup (workflow running)**
+
+### Стадии — статус
+- ✅ **Stage A** done — `e09749e`. Event-bus + DI cleanup (см. ниже).
+- 🔄 **Stage B** — workflow `wf_89343467-aea`, 5 агентов на disjoint-пакетах:
+  subscription utf8/base64, state buildTagSpec, build ruleset-convert, fynewidget
+  SetToolTipSafe, business/presentation template-dedup. После — full build + targeted
+  tests + commit.
+- ⏭ Отложено из B (риск/нужны golden): subscription transport_builder/tls_builder
+  (URI vs Xray drift — в Stage D с golden), ResolvedEntryMetadata embed (много literal-
+  сайтов, low value), DownloadStateComponent + srs_downloader (в Stage F с UI-декомпозицией).
+- Stage A решение: DI no-op placeholder консолидирован (удалён дубль в controller.go,
+  дефолты ставит NewUIService). `GetController` fallback удалён + `GetControllerOrPanic`.
+
+## Принятый план исполнения (из synthesis.json — see also zone_maps.json)
+
+8-слойная модель L0..L7 (platform → shared-internal → core-domain → services/lifecycle →
+api → ui-presentation → ui-views → ui-widgets). 7 ADR (в synthesis.json). Стадии
+(safe→complex), каждая = коммит, build+vet зелёные:
+
+- **Stage A** (synth-P1) Pure deletions: мёртвые EventKind (SubscriptionUpdated,
+  AutoUpdateStatus, PowerResume), Bus.SubscribeAll, ProxyActiveChanged-subscriber;
+  удалить GetController fallback + GetControllerOrPanic; консолидировать DI no-op
+  callbacks; фактические правки docs/ARCHITECTURE.md.
+- **Stage B** (synth-P2) Behavior-preserving dedup: subscription utf8/encoding/transport/
+  tls builders; convertRemoteRuleSetToLocal; ResolvedEntryMetadata; buildTagSpec hoist;
+  UI-хелперы (SetToolTipSafe, DownloadStateComponent, srs_downloader); business dedup.
+- **Stage C** (synth-P3) Domain monolith splits: state/load.go, adapter.go, node_parser.go,
+  share_uri_encode.go, api/clash.go, wintun_cleanup_windows.go.
+- **Stage D** (synth-P4) Build pipeline: outbound_generator.go → validity + JSONBuilder + filters.
+- **Stage E** (synth-P5) Lifecycle: process_service CrashHandler; controller split
+  (ProcessLifecycleManager+CacheManager); config_service split; SPEC 047 ph.6 event-wiring.
+- **Stage F** (synth-P6) Dual-state elimination (canonical Rules/DNS единственная правда);
+  UI-view декомпозиция (clash_api_tab, add_rule_dialog, edit_dialog, presenter_state,
+  wizard_dns); фикс layering-edges (click_redirect, core_dashboard_tab).
+- **Stage G** Документация: ARCHITECTURE.md (+схемы/ADR/file-inventory), DATA_FLOW.md, PIPELINE.md.
+- **Stage H** Финал: build, vet, полный test, deadcode, reinstall.
+
+> Риск-замечание: Stage F (dual-state) — самый крупный и рискованный; делаю с жёсткими
+> build/golden-гейтами, при нехватке стабильности оставляю задокументированным остатком.
+
+## ~~P0 — Инспекция~~ ✓ завершена
+Workflow `wf_5c40ebf9-185` (10 агентов, 557s). Результат → synthesis.json + zone_maps.json.
 
 ## Лог
 
