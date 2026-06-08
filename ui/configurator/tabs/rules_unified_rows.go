@@ -305,12 +305,19 @@ func buildSinglePresetRefRow(
 		enableCh.SetChecked(!enableCh.Checked)
 	})
 
-	leftLead := container.NewHBox(upBtn, downBtn, fynewidget.CheckLeadingWrap(enableCh))
+	// Match the custom-rule row (rules_tab.go): pack arrows and edit/delete
+	// tight via tightHBox; checkbox keeps its leading wrap, outbound select
+	// stays separated with normal HBox padding.
+	leftLead := container.NewHBox(
+		container.New(tightHBox{spacing: rowIconGap}, upBtn, downBtn),
+		fynewidget.CheckLeadingWrap(enableCh),
+	)
+	editDel := container.New(tightHBox{spacing: rowIconGap}, editBtn, delBtn)
 	var rightCluster *fyne.Container
 	if outSel != nil {
-		rightCluster = container.NewHBox(editBtn, delBtn, outSel)
+		rightCluster = container.NewHBox(editDel, outSel)
 	} else {
-		rightCluster = container.NewHBox(editBtn, delBtn)
+		rightCluster = container.NewHBox(editDel)
 	}
 	var center fyne.CanvasObject = labelTap
 	if srsHF != nil {
