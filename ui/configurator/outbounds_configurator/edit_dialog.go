@@ -389,6 +389,15 @@ func ShowEditDialog(
 			for k, v := range displayBody.Options {
 				cfg.Options[k] = v
 			}
+			// A selector must not carry urltest-only keys. If the user switched
+			// an edited urltest → selector, the wholesale copy above would leak
+			// url/interval/tolerance into the selector and produce an invalid
+			// config.json (sing-box rejects unknown selector fields).
+			if obType == "selector" {
+				delete(cfg.Options, "url")
+				delete(cfg.Options, "interval")
+				delete(cfg.Options, "tolerance")
+			}
 		} else if obType == "selector" {
 			cfg.Options = map[string]interface{}{"interrupt_exist_connections": true}
 		} else {

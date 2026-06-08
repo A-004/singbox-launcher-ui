@@ -365,9 +365,15 @@ func (ac *AppController) buildContextFromState(s *state.State, cache *build.Pars
 	// SPEC 045 фаза 9: execDir нужен MergeRouteSection-у для резолва путей
 	// SRS файлов (bin/rule-sets/<tag>.srs). Без этого convertRuleSetToLocalRequired
 	// не может проверить наличие файла и валит build с «empty execDir».
+	// execDir feeds both Route (SRS path resolution) and Preset (cached SRS
+	// lookup). Resolve once under a nil-guard — the SrsCachedPaths line below
+	// used to deref ac.FileService unconditionally (SA5011: nil-deref when ac
+	// or FileService is nil).
+	var execDir string
 	if ac != nil && ac.FileService != nil {
-		ctx.Route.ExecDir = ac.FileService.ExecDir
+		execDir = ac.FileService.ExecDir
 	}
+	ctx.Route.ExecDir = execDir
 	// SPEC 053: preset bundle merge — все правила из state.Rules в порядке.
 	// Если state.Rules не пуст, MergePresetsIntoRoute берёт на себя весь emit
 	// (preset/inline/srs). Noop когда RulesV6 пуст (legacy v5-only flow).
@@ -375,11 +381,9 @@ func (ac *AppController) buildContextFromState(s *state.State, cache *build.Pars
 		Presets:             td.Presets,
 		Rules:               s.Rules,
 		DNS:                 s.DNS,
-		SrsCachedPaths:      build.CollectSrsCachedPaths(s.Rules, ac.FileService.ExecDir),
+		SrsCachedPaths:      build.CollectSrsCachedPaths(s.Rules, execDir),
 		TemplateDNSDefaults: parseTemplateDNSDefaultsFromTD(td),
-	}
-	if ac != nil && ac.FileService != nil {
-		ctx.Preset.ExecDir = ac.FileService.ExecDir
+		ExecDir:             execDir,
 	}
 	return ctx
 }

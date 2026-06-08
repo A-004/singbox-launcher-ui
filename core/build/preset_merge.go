@@ -13,24 +13,18 @@
 package build
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"runtime"
-	"strings"
 
 	"singbox-launcher/core/state"
 	"singbox-launcher/core/template"
+	"singbox-launcher/internal/srstag"
 )
 
-// Local stdlib wrappers used by srsTagFromURLLocal / convertPresetRuleSetRemoteToLocal.
-// (Inline aliases — избавляют функции от длинных fully-qualified имен.)
+// osStatLocal — inline alias used by convertPresetRuleSetRemoteToLocal.
 func osStatLocal(p string) (os.FileInfo, error) { return os.Stat(p) }
-func urlParseLocal(s string) (*url.URL, error)  { return url.Parse(s) }
-func sha256SumLocal(b []byte) [sha256.Size]byte { return sha256.Sum256(b) }
 
 // convertPresetRuleSetRemoteToLocal — резолвит remote rule_set из preset'а в
 // type=local с path к скачанному файлу.
@@ -135,33 +129,14 @@ func cleanDanglingRuleSetInRule(rule map[string]interface{}, emittedTags map[str
 	return out
 }
 
-// SRSTagFromURL — content-addressed tag (same logic as
-// ui/configurator/dialogs.SRSTagFromURL — продублировано тут чтобы избежать
-// импорта UI пакета в core). Используется как core/build, так и core (orphan
-// GC через collectAllStageRuleSetTags). Должно быть вынесено в internal/srstag/
-// если будет ещё одна копия.
+// SRSTagFromURL — content-addressed SRS tag, shared with the configurator UI
+// via internal/srstag.TagFromURL (single source of truth — the downloader, this
+// build resolver and the UI must agree on bin/rule-sets/<tag>.srs or the rule
+// silently drops as "remote .srs not cached"). Used by core/build + core
+// (orphan GC via collectAllStageRuleSetTags).
 func SRSTagFromURL(urlStr string) string { return srsTagFromURLLocal(urlStr) }
 
-func srsTagFromURLLocal(urlStr string) string {
-	u, err := urlParseLocal(urlStr)
-	if err != nil {
-		return ""
-	}
-	path := u.Path
-	if path == "" {
-		path = urlStr
-	}
-	if i := strings.LastIndex(path, "/"); i >= 0 {
-		path = path[i+1:]
-	}
-	filename := strings.TrimSuffix(path, ".srs")
-	if filename == "" {
-		filename = "srs"
-	}
-	sum := sha256SumLocal([]byte(urlStr))
-	hash8 := hex.EncodeToString(sum[:4])
-	return filename + "-" + hash8
-}
+func srsTagFromURLLocal(urlStr string) string { return srstag.TagFromURL(urlStr) }
 
 // PresetMergeContext — input для MergePresetsIntoRoute/DNS.
 type PresetMergeContext struct {

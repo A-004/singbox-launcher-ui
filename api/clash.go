@@ -190,16 +190,20 @@ func ResetClashHTTPTransport() {
 	}
 }
 
-// apiLogFile is the target for API request logging (api.log). Set via SetAPILogFile.
-var apiLogFile *os.File
-
 var (
+	// apiLogSinkMu guards both apiLogFile and apiLogSink: they are set/cleared
+	// from the UI thread (open/close log files, open/close the log viewer) but
+	// read from request-handler goroutines in writeLog. Without it, a shutdown
+	// SetAPILogFile(nil) races writeLog → data race + write-after-close.
 	apiLogSinkMu sync.RWMutex
-	apiLogSink   func(debuglog.Level, string)
+	apiLogFile   *os.File                     // api.log target; set via SetAPILogFile, nil before close
+	apiLogSink   func(debuglog.Level, string) // optional diagnostics log-viewer callback
 )
 
 // SetAPILogFile sets the log file for API requests. Call after opening log files, pass nil before closing.
 func SetAPILogFile(f *os.File) {
+	apiLogSinkMu.Lock()
+	defer apiLogSinkMu.Unlock()
 	apiLogFile = f
 }
 
@@ -223,12 +227,13 @@ func writeLog(level debuglog.Level, format string, args ...interface{}) {
 		return
 	}
 	line := fmt.Sprintf(format, args...)
-	if apiLogFile != nil {
-		_, _ = fmt.Fprintf(apiLogFile, format, args...)
-	}
 	apiLogSinkMu.RLock()
+	f := apiLogFile
 	fn := apiLogSink
 	apiLogSinkMu.RUnlock()
+	if f != nil {
+		_, _ = fmt.Fprintf(f, format, args...)
+	}
 	if fn != nil {
 		fn(level, line)
 	}

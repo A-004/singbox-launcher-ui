@@ -255,9 +255,10 @@ func CreateSourcesTab(presenter *wizardpresentation.WizardPresenter) fyne.Canvas
 				// и так читается из URL (https://) vs URI (vless://, wireguard://);
 				// в Edit-окне есть Overview tab с явным "Type: Subscription/Server".
 				var leftBlock fyne.CanvasObject
+				var prefixLabel *ttwidget.Label
 				if pfx := strings.TrimSpace(tagPrefix); pfx != "" {
 					pfxShow := wizardutils.TruncateStringEllipsis(pfx, 24, "...")
-					prefixLabel := ttwidget.NewLabel(pfxShow)
+					prefixLabel = ttwidget.NewLabel(pfxShow)
 					prefixLabel.Importance = widget.MediumImportance
 					if pfxShow != pfx {
 						prefixLabel.SetToolTip(pfx)
@@ -266,7 +267,6 @@ func CreateSourcesTab(presenter *wizardpresentation.WizardPresenter) fyne.Canvas
 				}
 				_ = tagPostfix
 				var rowCenter fyne.CanvasObject = container.NewBorder(nil, nil, leftBlock, nil, sourceLabel)
-				var prefixLabel *ttwidget.Label
 
 				// Enable/disable toggle — persists to Source.Enabled.
 				// Dim the label importance so disabled rows are visibly inactive.
@@ -284,6 +284,11 @@ func CreateSourcesTab(presenter *wizardpresentation.WizardPresenter) fyne.Canvas
 						return
 					}
 					m.Sources[sourceIndex].Enabled = enabled
+					// Toggling a source is a savable change. UpdateParserConfig
+					// below suppresses the text widget's OnChanged MarkAsChanged
+					// (see UpdateParserConfig), so mark dirty explicitly — else
+					// the toggle is silently lost on close.
+					presenter.MarkAsChanged()
 					m.RefreshDerivedParserConfig()
 					m.PreviewNeedsParse = true
 					wizardbusiness.InvalidatePreviewCache(m)
