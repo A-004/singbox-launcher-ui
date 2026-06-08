@@ -146,16 +146,12 @@ func CreateDNSTab(presenter *wizardpresentation.WizardPresenter) fyne.CanvasObje
 						presenter.RefreshDNSListAndSelects()
 					}, rowGetter)
 					delBtn.Importance = widget.LowImportance
-					right = container.NewHBox(
-						container.New(tightHBox{spacing: rowIconGap}, editBtn, delBtn),
-						rowGutter,
-					)
+					right = container.NewHBox(buildRowEditDelCluster(editBtn, delBtn), rowGutter)
 				}
 				// Border: check left, content center (tap/hover → check via fynewidget), buttons right — avoids zero-width label in HBox-only row.
-				rowInner := container.NewBorder(nil, nil, cwc.CheckLeading, right, cwc.Content)
-				row = fynewidget.NewHoverRow(rowInner, fynewidget.HoverRowConfig{})
-				row.WireTooltipLabelHover(sumLabel)
-				serversBox.Add(row)
+				// Shared row tail (see row_scaffold.go); DNS servers have no ↑/↓ so
+				// the left is the CheckWithContent leading, not buildRowLeftLead.
+				row = finalizeRow(serversBox, cwc.CheckLeading, right, cwc.Content, sumLabel)
 			}(i)
 		}
 		// Append bundled-preset rows в общий список (без заголовка — 🔒 в label

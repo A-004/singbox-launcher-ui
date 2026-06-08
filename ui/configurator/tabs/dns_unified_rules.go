@@ -138,15 +138,10 @@ func buildSingleDNSUserRuleRow(
 		downBtn.Disable()
 	}
 
-	leftLead := container.NewHBox(
-		container.New(tightHBox{spacing: rowIconGap}, upBtn, downBtn),
-		fynewidget.CheckLeadingWrap(enableCh),
-	)
-	right := container.New(tightHBox{spacing: rowIconGap}, editBtn, delBtn)
-	rowInner := container.NewBorder(nil, nil, leftLead, right, label)
-	row = fynewidget.NewHoverRow(rowInner, fynewidget.HoverRowConfig{})
-	row.WireTooltipLabelHover(label)
-	dnsRulesBox.Add(row)
+	// Shared row scaffolding (see row_scaffold.go).
+	leftLead := buildRowLeftLead(upBtn, downBtn, enableCh)
+	right := buildRowEditDelCluster(editBtn, delBtn)
+	row = finalizeRow(dnsRulesBox, leftLead, right, label, label)
 }
 
 // buildSingleDNSPresetRuleRow — один tile для preset-ref DNS rule.
@@ -244,15 +239,10 @@ func buildSingleDNSPresetRuleRow(
 		downBtn.Disable()
 	}
 
-	leftLead := container.NewHBox(
-		container.New(tightHBox{spacing: rowIconGap}, upBtn, downBtn),
-		fynewidget.CheckLeadingWrap(enableCh),
-	)
+	// Shared row scaffolding (see row_scaffold.go). View-only row: no edit/del.
+	leftLead := buildRowLeftLead(upBtn, downBtn, enableCh)
 	right := container.NewHBox(viewBtn)
-	rowInner := container.NewBorder(nil, nil, leftLead, right, titleLabel)
-	row = fynewidget.NewHoverRow(rowInner, fynewidget.HoverRowConfig{})
-	row.WireTooltipLabelHover(titleLabel)
-	dnsRulesBox.Add(row)
+	row = finalizeRow(dnsRulesBox, leftLead, right, titleLabel, titleLabel)
 }
 
 // moveDNSSlotUp / moveDNSSlotDown — swap slots в DNSRuleOrder. Refresh

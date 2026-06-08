@@ -322,30 +322,17 @@ func buildSingleCustomRuleRow(
 	}
 	guiState.RuleOutboundSelects = append(guiState.RuleOutboundSelects, customRuleWidget)
 
-	// Pack the reorder arrows and the edit/delete icons tight (tightHBox with a
-	// negative gap); checkbox keeps its leading wrap and the outbound select
-	// stays separated with normal HBox padding.
-	arrowsCluster := container.New(tightHBox{spacing: rowIconGap}, moveUpButton, moveDownButton)
-	leftLead := container.NewHBox(arrowsCluster, fynewidget.CheckLeadingWrap(checkbox))
-	rightCluster := container.NewHBox(
-		container.New(tightHBox{spacing: rowIconGap}, editButton, deleteButton),
-		outboundWidget,
-	)
+	// Shared row scaffolding (see row_scaffold.go): leading ↑/↓+checkbox cluster
+	// and the right edit/delete cluster; the outbound select stays separated.
+	leftLead := buildRowLeftLead(moveUpButton, moveDownButton, checkbox)
+	rightCluster := container.NewHBox(buildRowEditDelCluster(editButton, deleteButton), outboundWidget)
 
-	labelTap := fynewidget.NewTapWrap(label, func() {
-		if checkbox.Disabled() {
-			return
-		}
-		checkbox.SetChecked(!checkbox.Checked)
-	})
+	labelTap := newRowLabelToggleTap(label, checkbox)
 	var center fyne.CanvasObject = labelTap
 	if srsHF != nil {
 		center = container.NewBorder(nil, nil, nil, srsHF, labelTap)
 	}
-	rowInner := container.NewBorder(nil, nil, leftLead, rightCluster, center)
-	row = fynewidget.NewHoverRow(rowInner, fynewidget.HoverRowConfig{})
-	row.WireTooltipLabelHover(label)
-	rulesBox.Add(row)
+	row = finalizeRow(rulesBox, leftLead, rightCluster, center, label)
 }
 
 // createRuleEnableCheckbox — чекбокс вкл/выкл; подпись правила обёрнута в TapWrap и тоже переключает состояние.
