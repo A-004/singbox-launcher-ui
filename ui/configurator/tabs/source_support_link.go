@@ -1,31 +1,31 @@
 package tabs
 
 import (
-	"image/color"
 	"net/url"
 	"strings"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	corestate "singbox-launcher/core/state"
+	"singbox-launcher/internal/debuglog"
+	"singbox-launcher/internal/fynewidget"
+	"singbox-launcher/internal/platform"
 	"singbox-launcher/internal/urlsafe"
 	"singbox-launcher/ui/icons"
 )
 
-// supportLinkForMeta builds the per-source support-link affordance shown under
-// a subscription row: an icon + the URL text.
+// supportLinkButton builds a small clickable icon for a source's provider
+// support / web-page link, to sit inline in the row's action cluster (info
+// panel) — no extra row height, no visible URL text.
 //
-//   - URL = meta.SupportURL if present, else meta.ProfileWebPageURL, else none.
-//   - Icon = blue Telegram plane for Telegram links (t.me / tg://), otherwise a
+//   - URL = meta.SupportURL (preferred) or meta.ProfileWebPageURL.
+//   - Icon: blue Telegram plane for Telegram links (t.me / tg://), else a
 //     generic link icon.
-//   - Safe schemes (http/https/tg, per urlsafe) render as a clickable hyperlink
-//     that opens in the browser/Telegram; an unsafe-but-present URL is shown as
-//     plain text (no OpenURL); nothing present → nil (caller omits the line).
-func supportLinkForMeta(meta *corestate.SubscriptionMeta) fyne.CanvasObject {
+//   - Tooltip: the full URL.
+//   - Click: opens the URL for safe schemes (http/https/tg, per urlsafe); an
+//     unsafe-but-present URL still shows the icon + tooltip but does not open.
+//   - Nothing present → nil (caller omits the button).
+func supportLinkButton(meta *corestate.SubscriptionMeta, rowGetter func() *fynewidget.HoverRow) *fynewidget.HoverForwardButton {
 	if meta == nil {
 		return nil
 	}
@@ -41,32 +41,21 @@ func supportLinkForMeta(meta *corestate.SubscriptionMeta) fyne.CanvasObject {
 	if isTelegramURL(raw) {
 		iconRes = icons.Telegram
 	}
-	img := canvas.NewImageFromResource(iconRes)
-	img.FillMode = canvas.ImageFillContain
-	sz := theme.CaptionTextSize() + 3
-	img.SetMinSize(fyne.NewSize(sz, sz))
+	safe := urlsafe.IsSafeAnnounceURL(raw)
 
-	display := supportLinkDisplayText(raw)
-
-	var textObj fyne.CanvasObject
-	if urlsafe.IsSafeAnnounceURL(raw) {
-		if u, err := url.Parse(strings.TrimSpace(raw)); err == nil {
-			link := widget.NewHyperlink(display, u)
-			link.Truncation = fyne.TextTruncateEllipsis
-			textObj = link
+	btn := fynewidget.NewHoverForwardButtonWithIcon("", iconRes, func() {
+		if !safe {
+			return
 		}
+		if err := platform.OpenURL(raw); err != nil {
+			debuglog.WarnLog("source support link: open %q failed: %v", raw, err)
+		}
+	}, rowGetter)
+	btn.Importance = widget.LowImportance
+	if tt, ok := interface{}(btn).(interface{ SetToolTip(string) }); ok {
+		tt.SetToolTip(raw)
 	}
-	if textObj == nil {
-		// Present but unsafe scheme (javascript:, file:, …) → plain text only.
-		lbl := canvas.NewText(display, theme.PlaceHolderColor())
-		lbl.TextSize = theme.CaptionTextSize()
-		textObj = lbl
-	}
-
-	// Indent to align with the subtitle meta line (48px gutter ≈ checkbox col).
-	leftPad := canvas.NewRectangle(color.Transparent)
-	leftPad.SetMinSize(fyne.NewSize(44, sz))
-	return container.NewBorder(nil, nil, container.NewHBox(leftPad, img), nil, textObj)
+	return btn
 }
 
 // isTelegramURL reports whether raw is a Telegram link: scheme tg:// or a
@@ -85,14 +74,4 @@ func isTelegramURL(raw string) bool {
 		return true
 	}
 	return strings.HasSuffix(host, ".t.me")
-}
-
-// supportLinkDisplayText strips the scheme + trailing slash for a compact label
-// (e.g. "https://t.me/foo/" → "t.me/foo").
-func supportLinkDisplayText(raw string) string {
-	s := strings.TrimSpace(raw)
-	s = strings.TrimPrefix(s, "https://")
-	s = strings.TrimPrefix(s, "http://")
-	s = strings.TrimSuffix(s, "/")
-	return s
 }

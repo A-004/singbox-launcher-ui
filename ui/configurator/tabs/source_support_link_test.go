@@ -24,18 +24,3 @@ func TestIsTelegramURL(t *testing.T) {
 		}
 	}
 }
-
-func TestSupportLinkDisplayText(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"https://t.me/foo", "t.me/foo"},
-		{"http://example.com/support/", "example.com/support"},
-		{"https://example.com/", "example.com"},
-		{"tg://resolve?domain=bot", "tg://resolve?domain=bot"},
-		{"  https://x.io/y  ", "x.io/y"},
-	}
-	for _, c := range cases {
-		if got := supportLinkDisplayText(c.in); got != c.want {
-			t.Errorf("supportLinkDisplayText(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}

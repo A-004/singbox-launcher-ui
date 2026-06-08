@@ -388,6 +388,12 @@ func CreateSourcesTab(presenter *wizardpresentation.WizardPresenter) fyne.Canvas
 				if noticeBtn != nil {
 					rightControlsItems = append(rightControlsItems, noticeBtn)
 				}
+				// SPEC 069 feature: provider support / web-page link — small inline
+				// icon in the info panel (TG plane / link), tooltip = URL, click opens.
+				// No extra row height; nil for sources without a support URL.
+				if supportBtn := supportLinkButton(meta, rowGetter); supportBtn != nil {
+					rightControlsItems = append(rightControlsItems, supportBtn)
+				}
 				rightControlsItems = append(rightControlsItems, copyBtn, editBtn)
 				if refreshBtn != nil {
 					rightControlsItems = append(rightControlsItems, refreshBtn)
@@ -408,10 +414,6 @@ func CreateSourcesTab(presenter *wizardpresentation.WizardPresenter) fyne.Canvas
 						leftPad := canvas.NewRectangle(color.Transparent)
 						leftPad.SetMinSize(fyne.NewSize(48, 0))
 						lines = append(lines, container.NewBorder(nil, nil, leftPad, nil, subtitleText))
-					}
-					// SPEC 069 feature: provider support / web-page link (icon + URL).
-					if supportRow := supportLinkForMeta(meta); supportRow != nil {
-						lines = append(lines, supportRow)
 					}
 					if len(lines) > 1 {
 						rowInner = container.New(tightVBox{}, lines...)
