@@ -23,9 +23,6 @@ import (
 	"singbox-launcher/internal/srstag"
 )
 
-// osStatLocal — inline alias used by convertPresetRuleSetRemoteToLocal.
-func osStatLocal(p string) (os.FileInfo, error) { return os.Stat(p) }
-
 // convertPresetRuleSetRemoteToLocal — резолвит remote rule_set из preset'а в
 // type=local с path к скачанному файлу.
 //
@@ -53,7 +50,7 @@ func convertPresetRuleSetRemoteToLocal(rs map[string]interface{}, execDir string
 		return rs, true
 	}
 	path := execDir + "/bin/rule-sets/" + contentTag + ".srs"
-	if _, err := osStatLocal(path); err != nil {
+	if _, err := os.Stat(path); err != nil {
 		return rs, true // файл не скачан → skip
 	}
 	// Mutate copy: type=local, добавить path, удалить url/download_detour/update_interval.

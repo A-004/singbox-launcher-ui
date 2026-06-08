@@ -16,10 +16,22 @@
 - Запускаю Phase 0 workflow (параллельные ридеры → карта архитектуры + decision-sheet).
 
 ## Сделано (коммиты)
-_(пока нет)_
+- `ffb6f7a` docs(spec070): план + трекер.
+- `acaae74` refactor(spec070) P1 safe fixes: dedup matchesPlatform→VarAppliesOnGOOS;
+  source delete-handler MarkAsChanged; preview cap → const previewNodeCap; gofmt loader.go.
+- _(pending commit)_ inline osStatLocal → os.Stat в core/build/preset_merge.go.
+
+### P0 — статус
+Workflow `wf_5c40ebf9-185` (9 zone-readers + synthesis) запущен, ждём результат для
+систематического P2–P6. Параллельно сделаны независимые P1-items выше.
 
 ## UI-изменения для ревью пользователя
-_(пока нет)_
+1. **Удаление источника теперь зажигает кнопку Save** (`source_tab.go`): раньше после
+   удаления строки источника состояние не помечалось dirty и Save не активировался —
+   приходилось делать ещё одно изменение. Теперь delete сразу помечает изменения.
 
 ## Открытые риски / решения
-_(пока нет)_
+- gofmt-дрейф в ~60 файлах (CI не гейтит) — сделаю единым sweep-коммитом в конце,
+  чтобы не пересекаться с декомпозицией.
+- SetToolTip-дедуп, EN→locale.T, чистка исторических комментариев — отложены до
+  synthesis (нужен точный перечень мест; пересекаются с P4-декомпозицией).
