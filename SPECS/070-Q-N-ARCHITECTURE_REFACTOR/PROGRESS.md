@@ -3,7 +3,29 @@
 > Обновляется по ходу работы. Источник правды о том, что сделано и что осталось.
 > Стартовая точка: HEAD `f9f2d06`, ветка `develop`, дерево чистое.
 
-## Текущая фаза: **Stage C — domain monolith splits (workflow running)**
+## Текущая фаза: **Stage F-UI — UI monolith splits (workflow running)**
+
+### Лог стадий (новее → старше)
+- ✅ **Stage D** — `6c82137`. outbound_generator.go (1086→688) → outbound_validity.go +
+  outbound_jsonbuilder.go (pure move). Golden tests byte-identical. JSONBuilder-rewrite отложен.
+- ✅ **Stage C** — `6e77d96`. Split state/load+adapter, subscription/node_parser+share_uri,
+  api/clash, platform/wintun. Live build darwin+win(pkgs)+tests зелёные.
+- 🔄 **Stage F-UI** — workflow `wf_8a845dd0-f6c`, 5 агентов pure-move splits:
+  ui-root (clash_api_tab+core_dashboard_tab), dialogs/add_rule_dialog,
+  outbounds_configurator/edit_dialog+configurator, presentation/presenter_state,
+  business/wizard_dns. Только top-level decls; гигантские closure-builder'ы НЕ трогаем.
+
+### Решение по объёму (safety-first, юзер away, GUI не проверить автономно)
+- **Делаю:** Stage E process_service CrashHandler dedup (core, build+test verify);
+  Stage F-UI pure-move splits; Stage G docs (ARCHITECTURE.md + ADR + file-inventory);
+  Stage H gofmt+tests+deadcode+reinstall.
+- **Откладываю + документирую как designed target (ADR в ARCHITECTURE.md):**
+  controller field-extraction (ADR-070-7, высокий риск конкуррентности),
+  dual-state elimination (ADR-070-2, огромный риск + нужен runtime-verify),
+  SPEC 047 ph.6 callback→event retirement (ADR-070-3, нужен GUI smoke-test),
+  JSONBuilder rewrite, transport/tls unification (golden-gated).
+  Причина: их нельзя безопасно верифицировать автономно без GUI; рискованно ломать
+  пока юзер away. Event-bus УЖЕ почищен (Stage A) — мёртвые события убраны.
 
 ### Стадии — статус
 - ✅ **Stage A** done — `e09749e`. Event-bus + DI cleanup.
