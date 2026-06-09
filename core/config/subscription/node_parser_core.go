@@ -569,11 +569,18 @@ func buildOutbound(node *configtypes.ParsedNode) map[string]interface{} {
 		if network == "" {
 			network = "tcp"
 		}
-		if network == "xhttp" {
-			network = "httpupgrade"
-		}
 
 		switch {
+		case network == "xhttp":
+			// sing-box-lx xhttp transport (SPEC 071). Distinct from httpupgrade.
+			tr := xhttpTransportFromQuery(node.Query)
+			if _, ok := tr["host"]; !ok {
+				if h := queryGetFold(node.Query, "sni"); h != "" {
+					tr["host"] = h
+				}
+			}
+			outbound["transport"] = tr
+
 		case network == "httpupgrade":
 			tr := map[string]interface{}{"type": "httpupgrade"}
 			if p := node.Query.Get("path"); p != "" {
