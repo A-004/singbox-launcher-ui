@@ -200,3 +200,46 @@ func TestAWG_TypeFidelity_JSON(t *testing.T) {
 		t.Errorf("i1 must be a string %q, got %T %v", "<r 24>", m["i1"], m["i1"])
 	}
 }
+
+// TestParseWireGuardURI_MTUClamp verifies the AWG MTU policy (SPEC 073 follow-up):
+// AmneziaWG endpoints default to / are clamped to awgMaxMTU (1280) because AWG's
+// S3/S4 transport padding would otherwise push data packets past the path MTU and
+// fail with EMSGSIZE (handshake OK, data silently stops). Plain WireGuard keeps
+// the upstream 1420 default and honors the URI value verbatim.
+func TestParseWireGuardURI_MTUClamp(t *testing.T) {
+	const (
+		pk   = "UFJJVkFURUtFWTAwMDAwMDAwMDAwMDAwMDAwMA="
+		pub  = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo="
+		base = "publickey=" + pub + "&address=10.0.0.2/32&allowedips=0.0.0.0/0"
+	)
+	uri := func(extra string) string {
+		return "wireguard://" + pk + "@server.example.com:51821?" + base + extra + "#n"
+	}
+	cases := []struct {
+		name  string
+		extra string
+		want  int
+	}{
+		{"awg high mtu clamped", "&jc=10&mtu=1420", 1280},
+		{"awg no mtu defaults low", "&jc=10", 1280},
+		{"awg explicit lower honored", "&jc=10&mtu=1200", 1200},
+		{"awg string-only field still AWG", "&i1=%3Cr+24%3E&mtu=1500", 1280},
+		{"plain wg keeps high mtu", "&mtu=1500", 1500},
+		{"plain wg default", "", 1420},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			n, err := parseWireGuardURI(uri(c.extra), nil)
+			if err != nil || n == nil {
+				t.Fatalf("parse: err=%v node=%v", err, n)
+			}
+			got, ok := n.Outbound["mtu"].(int)
+			if !ok {
+				t.Fatalf("mtu type = %T, want int", n.Outbound["mtu"])
+			}
+			if got != c.want {
+				t.Errorf("mtu = %d, want %d", got, c.want)
+			}
+		})
+	}
+}

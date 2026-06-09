@@ -91,11 +91,25 @@ func parseWireGuardURI(uri string, skipFilters []map[string]string) (*configtype
 		return nil, fmt.Errorf("invalid wireguard URI: address or allowedips empty after parse")
 	}
 
-	mtu := 1420
+	// AmneziaWG transport padding (S3/S4) inflates every data packet, so an AWG
+	// endpoint needs a lower MTU than plain WireGuard — otherwise a full-size
+	// packet exceeds the path MTU and the OS rejects it with EMSGSIZE
+	// ("message too long"): the handshake succeeds but data silently stops.
+	// Default AWG to awgMaxMTU and clamp any higher URI value down to it; honor an
+	// explicitly lower value; plain WireGuard keeps the upstream 1420 default.
+	isAWG := hasAWGParams(q)
+	mtu := defaultWireGuardMTU
+	if isAWG {
+		mtu = awgMaxMTU
+	}
 	if m := q.Get("mtu"); m != "" {
 		if mi, err := strconv.Atoi(m); err == nil {
 			mtu = mi
 		}
+	}
+	if isAWG && mtu > awgMaxMTU {
+		debuglog.DebugLog("parseWireGuardURI: clamping AWG mtu %d -> %d (AmneziaWG padding overhead)", mtu, awgMaxMTU)
+		mtu = awgMaxMTU
 	}
 	listenport := 0
 	if lp := q.Get("listenport"); lp != "" {
@@ -212,6 +226,35 @@ var (
 	awgNumericFields = []string{"jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4"}
 	awgStringFields  = []string{"i1", "i2", "i3", "i4", "i5"}
 )
+
+const (
+	// defaultWireGuardMTU is the upstream WireGuard tunnel MTU.
+	defaultWireGuardMTU = 1420
+	// awgMaxMTU caps AmneziaWG endpoints. It is the AmneziaWG-recommended client
+	// MTU and the IPv6 minimum, leaving headroom for S3/S4 transport padding so
+	// the obfuscated packet stays under a 1500-byte path (1500 - 28 UDP/IP - 32
+	// WireGuard - 60 max S3/S4 = 1380 ceiling; 1280 adds margin for PPPoE/mobile/
+	// nested paths). A too-high MTU fails silently (handshake OK, no data), so we
+	// clamp rather than trust the URI value. See SPEC 073 and the lx-config docs.
+	awgMaxMTU = 1280
+)
+
+// hasAWGParams reports whether the query carries any AmneziaWG obfuscation field
+// (numeric jc/jmin/jmax/s/h or string i1-i5). Drives the MTU policy: AWG
+// endpoints are clamped to awgMaxMTU; a plain WireGuard URI is left untouched.
+func hasAWGParams(q url.Values) bool {
+	for _, k := range awgNumericFields {
+		if strings.TrimSpace(q.Get(k)) != "" {
+			return true
+		}
+	}
+	for _, k := range awgStringFields {
+		if strings.TrimSpace(q.Get(k)) != "" {
+			return true
+		}
+	}
+	return false
+}
 
 // applyAWGFields extracts AmneziaWG obfuscation params from a wireguard:// (or
 // awg://) query and promotes them to the endpoint root. Numeric fields are
