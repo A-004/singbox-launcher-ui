@@ -6,6 +6,7 @@
 
 ## EN
 ### Highlights
+- **AmneziaWG (AWG 2.0) parameters supported.** WireGuard nodes can now carry the AWG obfuscation params — `jc`/`jmin`/`jmax`, `s1`–`s4`, `h1`–`h4` (numbers) and the CPS packets `i1`–`i5` (strings) — parsed from `wireguard://` / `awg://` subscription URIs, generated into the `endpoints[]` config, and round-tripped back to share URIs without loss. (Runtime requires the sing-box-lx core; until that ships the config is built but the stock core rejects AWG fields — see SPEC 072.)
 - **Debug API: "Regenerate token" button.** Settings → Debug API now has a Regenerate button next to Copy token. It rotates the bearer token (confirm dialog — the old token stops working immediately) and, if the API is running, restarts the listener with the new token.
 
 ### Technical / Internal
@@ -14,6 +15,7 @@
 
 ## RU
 ### Основное
+- **Поддержка параметров AmneziaWG (AWG 2.0).** WireGuard-узлы теперь несут AWG-параметры обфускации — `jc`/`jmin`/`jmax`, `s1`–`s4`, `h1`–`h4` (числа) и CPS-пакеты `i1`–`i5` (строки) — парсятся из подписочных URI `wireguard://` / `awg://`, эмитятся в `endpoints[]` конфига и без потерь сериализуются обратно в share-URI. (В рантайме нужно ядро sing-box-lx; до его подключения конфиг собирается, но stock-ядро отвергает AWG-поля — см. SPEC 072.)
 - **Debug API: кнопка «Перегенерировать токен».** В Settings → Debug API рядом с «Копировать токен» появилась кнопка перегенерации. Она ротирует bearer-токен (с подтверждением — старый сразу перестаёт работать) и, если API запущен, перезапускает listener с новым токеном.
 
 ### Техническое / Внутреннее
