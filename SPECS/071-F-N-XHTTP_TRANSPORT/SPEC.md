@@ -46,7 +46,7 @@
 - AmneziaWG 2.0 и любые WireGuard-расширения (`jc/jmin/jmax/...`) — отдельная SPEC.
 - Шаблонные presets/`bin/wizard_template.json` с готовыми XHTTP-пресетами — не вводим (узлы приходят из подписок; presets можно добавить позже отдельным template-cleanup).
 - Полноформенный UI с отдельными полями transport (mode-dropdown, padding-range и т.п.) в form-табе редактора — out of scope; редактор XHTTP идёт через Raw-JSON-таб (form-таб transport-внутренности не показывает — это нынешнее поведение, см. `ui/configurator/outbounds_configurator/edit_dialog.go`).
-- Реальная негоциация `mode=auto` (в fork'е `auto` сейчас алиас на `stream-one`) — лаунчер просто прокидывает значение как есть.
+- Реальная негоциация `mode=auto` (в fork'е `auto` использует `packet-up`, live-validated против Xray/3x-ui; см. `sing-box-lx/docs/lx-config.md`) — лаунчер просто прокидывает значение как есть.
 
 ## Входные данные
 
@@ -160,9 +160,9 @@ Verify: `go test ./core/config/...` зелёный; существующие sub
 
 1. **Реальное решение мейнтейнера: что делать со стоковым ядром.** После этой SPEC лаунчер генерит `transport.type=xhttp`. Если у юзера всё ещё стоковый sing-box (фича-гейт `with_xhttp` отсутствует), ядро **reject'ит** конфиг целиком на load. Варианты: **(A)** жёстко завязать на SPEC 072 — генерить xhttp только когда `RequiredCoreVersion` указывает на fork-сборку (но версия пинится константой, рантайм-детекта build-тегов у лаунчера нет); **(B)** сохранить деградацию в `httpupgrade` как fallback, переключаемый по версии ядра; **(C)** считать, что после релиза с fork-ядром стокового не остаётся, и не делать fallback. Рекомендация: **(C)** + строгая зависимость от 072 в release-checklist (см. § Принцип очерёдности). Решение за мейнтейнером — задокументировать в release notes.
 
-2. **`mode=auto` в fork'е — алиас на `stream-one`.** Реальной негоциации (try stream-one → fallback packet-up) нет. Лаунчер прокидывает `auto` как есть; со старыми Xray-серверами это может не сойтись. Лаунчер ничего тут не чинит — это контракт ядра. Открытый вопрос: предупреждать ли юзера в UI при `mode=auto`. Предложение: нет (out of scope), но отметить в release notes.
+2. **`mode` семантика — контракт ядра (уточнено по `lx-config.md`).** `auto` использует `packet-up` (live-validated против Xray/3x-ui). `stream-one` имеет известный баг downlink-framing — выбирать только осознанно. Лаунчер прокидывает `mode` как есть и ничего не навязывает. Открытый вопрос: предупреждать ли в UI про `stream-one`. Предложение: нет (out of scope).
 
-3. **Padding placement не подтверждён live-тестом.** В research XHTTP помечен как «O» (pending live test): sing-box-lx эмитит standalone-заголовок `X-Padding`, тогда как текущий Xray кладёт `x_padding` в query Referer. Если ядро отдаёт не то, что ждёт сервер — узел не подключится, и это **не** баг лаунчера (лаунчер лишь прокидывает `x_padding_bytes`). Решение: не блокировать эту SPEC на этом, но в release-checklist потребовать подтверждённый live-тест XHTTP против реального Xray-сервера до user-visible релиза.
+3. **Padding wire-format — ПОДТВЕРЖДЁН (закрыто).** Per `lx-config.md`: padding несётся как `x_padding=<zeros>` в заголовке `Referer` (дефолтное размещение Xray), live-validated против реального Xray (3x-ui); сервер валидирует длину `x_padding` (дефолт 100–1000) и отвечает `400` без него. Лаунчер лишь прокидывает `x_padding_bytes` — размещение на стороне ядра. Прежнее опасение про standalone `X-Padding`-заголовок снято. (Версии клиента/сервера Xray желательно держать совместимыми — XHTTP быстро эволюционирует.)
 
 4. **`headers` тип-несовпадение.** URI-парсер кладёт `headers` как `map[string]interface{}`, а нынешний эмиттер (`outbound_jsonbuilder.go:68`) ждёт `map[string]string` — иначе headers молча дропаются. Фаза 3 обязана покрыть обе формы, иначе extra-headers (User-Agent override и т.п.) теряются тихо.
 
