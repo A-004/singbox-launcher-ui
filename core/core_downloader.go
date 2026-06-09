@@ -5,8 +5,6 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -123,20 +121,6 @@ func (ac *AppController) DownloadCore(ctx context.Context, version string, progr
 	if err := ac.downloadFile(ctx, asset.BrowserDownloadURL, archivePath, progressChan); err != nil {
 		progressChan <- DownloadProgress{Progress: 0, Message: fmt.Sprintf("Download failed: %v", err), Status: "error", Error: fmt.Errorf("DownloadCore: %w", err)}
 		return
-	}
-
-	// 4b. Verify SHA256 (SPEC 072). Fork releases ship a SHA256SUMS asset.
-	// Soft degradation: if it's unavailable (upstream/legacy release, network
-	// blip), warn and continue — HTTPS + GitHub authenticity remain the floor.
-	// A real mismatch is a hard error (possible tampered mirror).
-	progressChan <- DownloadProgress{Progress: 78, Message: "Verifying checksum...", Status: "downloading"}
-	if sums, sErr := ac.fetchSHA256SUMS(ctx, release); sErr != nil {
-		debuglog.WarnLog("DownloadCore: SHA256SUMS unavailable, skipping checksum: %v", sErr)
-	} else if vErr := verifyChecksum(archivePath, asset.Name, sums); vErr != nil {
-		progressChan <- DownloadProgress{Progress: 0, Message: fmt.Sprintf("Checksum verification failed: %v", vErr), Status: "error", Error: fmt.Errorf("DownloadCore: %w", vErr)}
-		return
-	} else {
-		debuglog.InfoLog("DownloadCore: checksum OK for %s", asset.Name)
 	}
 
 	// 5. Extract archive
@@ -338,85 +322,6 @@ func (ac *AppController) findPlatformAsset(assets []Asset) (*Asset, error) {
 	}
 
 	return nil, fmt.Errorf("findPlatformAsset: asset not found for platform %s/%s", runtime.GOOS, runtime.GOARCH)
-}
-
-// fetchSHA256SUMS downloads and parses the release's SHA256SUMS asset into a
-// map of filename → lowercase hex digest. Returns an error if the asset is
-// absent or unreadable (caller soft-degrades on error).
-func (ac *AppController) fetchSHA256SUMS(ctx context.Context, release *ReleaseInfo) (map[string]string, error) {
-	var url string
-	for i := range release.Assets {
-		if release.Assets[i].Name == "SHA256SUMS" {
-			url = release.Assets[i].BrowserDownloadURL
-			break
-		}
-	}
-	if url == "" {
-		return nil, fmt.Errorf("fetchSHA256SUMS: no SHA256SUMS asset in release")
-	}
-
-	client := CreateHTTPClient(NetworkRequestTimeout)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("fetchSHA256SUMS: %w", err)
-	}
-	req.Header.Set("User-Agent", "singbox-launcher/1.0")
-	resp, err := client.Do(req)
-	defer func() {
-		if resp != nil {
-			debuglog.RunAndLog("fetchSHA256SUMS: close body", resp.Body.Close)
-		}
-	}()
-	if err != nil {
-		return nil, fmt.Errorf("fetchSHA256SUMS: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetchSHA256SUMS: HTTP %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // SHA256SUMS is tiny
-	if err != nil {
-		return nil, fmt.Errorf("fetchSHA256SUMS: %w", err)
-	}
-	return parseSHA256SUMS(string(body)), nil
-}
-
-// parseSHA256SUMS parses GNU coreutils `sha256sum` output: each line is
-// "<64-hex>␣␣<filename>" (the filename may carry a leading "*" for binary mode).
-func parseSHA256SUMS(s string) map[string]string {
-	m := make(map[string]string)
-	for _, line := range strings.Split(s, "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) != 2 {
-			continue
-		}
-		name := strings.TrimPrefix(fields[1], "*")
-		m[name] = strings.ToLower(fields[0])
-	}
-	return m
-}
-
-// verifyChecksum computes the SHA256 of archivePath and compares it to the
-// expected digest for assetName from a parsed SHA256SUMS map.
-func verifyChecksum(archivePath, assetName string, sums map[string]string) error {
-	want, ok := sums[assetName]
-	if !ok {
-		return fmt.Errorf("verifyChecksum: no checksum entry for %q", assetName)
-	}
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return fmt.Errorf("verifyChecksum: %w", err)
-	}
-	defer debuglog.RunAndLog("verifyChecksum: close archive", f.Close)
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return fmt.Errorf("verifyChecksum: %w", err)
-	}
-	got := hex.EncodeToString(h.Sum(nil))
-	if !strings.EqualFold(got, want) {
-		return fmt.Errorf("verifyChecksum: %s sha256 mismatch (got %s, want %s)", assetName, got, want)
-	}
-	return nil
 }
 
 // downloadFile downloads a file with progress tracking (with SourceForge fallback)

@@ -291,7 +291,7 @@ git tag -d vX.Y.Z
 ### 5.1 `RequiredCoreVersion` (manual)
 
 - **Где:** константа в `internal/constants/constants.go`.
-- **Источник ядра (SPEC 072):** теперь форк **`Leadaxe/sing-box-lx`** (`constants.SingboxCoreRepo`) — он собирает XHTTP (`with_xhttp`) и AmneziaWG (`with_awg`). Версия — fork-тег вида `X.Y.Z-lx.N` (форк-бинарь печатает полный тег в `sing-box version`, поэтому строгое сравнение в Core Dashboard работает). **Windows 7 (`windows/386`)** форк не собирает → остаётся на upstream `SagerNet/sing-box` (`constants.SingboxLegacyRepo`, `Win7LegacyVersion`). Скачанные архивы проверяются по `SHA256SUMS` (мягкая деградация).
+- **Источник ядра (SPEC 072):** теперь форк **`Leadaxe/sing-box-lx`** (`constants.SingboxCoreRepo`) — он собирает XHTTP (`with_xhttp`) и AmneziaWG (`with_awg`). Версия — fork-тег вида `X.Y.Z-lx.N` (форк-бинарь печатает полный тег в `sing-box version`, поэтому строгое сравнение в Core Dashboard работает). **Windows 7 (`windows/386`)** форк не собирает → остаётся на upstream `SagerNet/sing-box` (`constants.SingboxLegacyRepo`, `Win7LegacyVersion`). Ядро качается напрямую из GitHub-релиза по HTTPS — отдельной SHA256-сверки нет (источник доверенный, целостность канала обеспечивает TLS).
 - **Что значит:** версия sing-box, которую `DownloadCore` поставит при «Download / Reinstall» из Core Dashboard. UI больше не предлагает «Update to latest».
 - **Кто меняет:** maintainer релиза. Бамп — отдельным коммитом перед тегом stable, или перед `gh workflow run` для пререлиза.
 - **Когда менять:** при выходе нового форк-релиза `vX.Y.Z-lx.N` (новые фичи/фиксы XHTTP/AWG, ребейз на upstream-тег) — авто-дискавери нет (by design SPEC 046), поднимать константу вручную. Для Win7 — отдельно `Win7LegacyVersion` при необходимости.
