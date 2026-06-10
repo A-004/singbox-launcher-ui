@@ -338,6 +338,11 @@ func applyAWGFields(endpoint map[string]interface{}, q url.Values) {
 				endpoint[k] = rng
 				continue
 			}
+			// A silently dropped header means the core falls back to the WG
+			// default message type and the handshake won't match the server —
+			// the exact failure mode of the original 073.2 bug. Warn loudly.
+			debuglog.WarnLog("Parser: AWG %s=%q is not a uint32 or lo-hi range — field dropped, the core will use the WireGuard default header", k, raw)
+			continue
 		}
 		debuglog.DebugLog("applyAWGFields: skip %s=%q (invalid value)", k, raw)
 	}
@@ -350,6 +355,49 @@ func applyAWGFields(endpoint map[string]interface{}, q url.Values) {
 		}
 		endpoint[k] = v
 	}
+	if a, b := awgHeaderOverlap(endpoint); a != "" {
+		debuglog.WarnLog("Parser: AWG magic headers %s and %s overlap — the core will reject this endpoint ('headers must not overlap')", a, b)
+	}
+}
+
+// awgHeaderOverlap reports a pair of magic-header fields whose effective
+// ranges overlap ("", "" when all four are disjoint). Mirrors the core
+// contract (SPEC 073.2): an unset/zero header counts as its WireGuard default
+// message type (h1=1 … h4=4), a single value as [v,v], a range as [lo,hi].
+// The core rejects an overlapping set at load with "headers must not
+// overlap", so the parser warns already at import time; the node itself is
+// still produced — the core's error stays the source of truth.
+func awgHeaderOverlap(endpoint map[string]interface{}) (string, string) {
+	type span struct {
+		name   string
+		lo, hi uint64
+	}
+	spans := make([]span, 0, 4)
+	for i, k := range []string{"h1", "h2", "h3", "h4"} {
+		s := span{name: k, lo: uint64(i + 1), hi: uint64(i + 1)} // WG default
+		switch v := endpoint[k].(type) {
+		case int64:
+			if v > 0 {
+				s.lo, s.hi = uint64(v), uint64(v)
+			}
+		case string:
+			loStr, hiStr, _ := strings.Cut(v, "-")
+			lo, errLo := strconv.ParseUint(loStr, 10, 32)
+			hi, errHi := strconv.ParseUint(hiStr, 10, 32)
+			if errLo == nil && errHi == nil {
+				s.lo, s.hi = lo, hi
+			}
+		}
+		spans = append(spans, s)
+	}
+	for i := 0; i < len(spans); i++ {
+		for j := i + 1; j < len(spans); j++ {
+			if spans[i].lo <= spans[j].hi && spans[j].lo <= spans[i].hi {
+				return spans[i].name, spans[j].name
+			}
+		}
+	}
+	return "", ""
 }
 
 // awgHeaderFields — magic-header fields (h1–h4) that, unlike the other AWG

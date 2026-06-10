@@ -9,6 +9,7 @@
 ### Technical / Internal
 - `parseAWGHeaderRange` in `node_parser_wireguard.go`: plain uint32 → int64 (JSON number) as before; `lo-hi` on `h1`–`h4` → normalized range string (reversed bounds reordered); ranges on other numeric AWG fields and invalid values keep the skip-with-debug-log policy. Share-URI emits the range unchanged (`awgNumericString` already passes strings through) — lossless round-trip. Tests: `awg_range_test.go`.
 - `chore(core)`: `RequiredCoreVersion` 1.13.13-lx.5 → **1.13.13-lx.6** (native `"hN": "lo-hi"` support; earlier cores reject the string form).
+- Import-time diagnostics: garbage in `h1`–`h4` and overlapping effective header ranges (incl. WG defaults for unset headers) now log warnings — the core rejects overlapping sets with `headers must not overlap`.
 
 ## RU
 ### Основное
@@ -17,3 +18,4 @@
 ### Техническое / Внутреннее
 - `parseAWGHeaderRange` в `node_parser_wireguard.go`: одиночный uint32 → int64 (JSON-число) как раньше; `lo-hi` на `h1`–`h4` → нормализованная строка диапазона (перевёрнутые границы упорядочиваются); диапазоны на прочих числовых AWG-полях и невалидные значения — прежняя политика skip + debug-log. Share-URI отдаёт диапазон без изменений (`awgNumericString` уже пропускал строки) — round-trip без потерь. Тесты: `awg_range_test.go`.
 - `chore(core)`: `RequiredCoreVersion` 1.13.13-lx.5 → **1.13.13-lx.6** (нативная поддержка `"hN": "lo-hi"`; старые ядра отвергают строковую форму).
+- Диагностика при импорте: мусор в `h1`–`h4` и пересечение эффективных диапазонов заголовков (включая WG-дефолты незаданных) теперь дают warn в логе — ядро отвергает пересекающиеся наборы с `headers must not overlap`.

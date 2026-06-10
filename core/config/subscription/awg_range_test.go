@@ -148,3 +148,36 @@ PersistentKeepalive = 25
 		t.Errorf("mtu = %v, want AWG default 1280", node.Outbound["mtu"])
 	}
 }
+
+// Overlap detection mirrors the core contract: unset header = WG default
+// (h1=1 … h4=4), single = [v,v], range = [lo,hi].
+func TestAWGHeaderOverlap(t *testing.T) {
+	cases := []struct {
+		name     string
+		ep       map[string]interface{}
+		wantPair bool
+	}{
+		{"real-world disjoint ranges", map[string]interface{}{
+			"h1": "43613244-384550127", "h2": "826869626-2105069164",
+			"h3": "2124774725-2141151992", "h4": "2144594503-2146278491",
+		}, false},
+		{"distinct singles", map[string]interface{}{
+			"h1": int64(100), "h2": int64(200), "h3": int64(300), "h4": int64(400),
+		}, false},
+		{"range covers default of unset h2", map[string]interface{}{
+			"h1": "1-100",
+		}, true},
+		{"single inside range", map[string]interface{}{
+			"h1": int64(500), "h2": "400-600", "h3": int64(700), "h4": int64(800),
+		}, true},
+		{"no awg headers at all", map[string]interface{}{}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a, b := awgHeaderOverlap(c.ep)
+			if got := a != ""; got != c.wantPair {
+				t.Errorf("overlap = %v (%s/%s), want %v", got, a, b, c.wantPair)
+			}
+		})
+	}
+}
