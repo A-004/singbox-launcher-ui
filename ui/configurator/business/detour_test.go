@@ -60,6 +60,48 @@ func TestDetourOptions_ExcludesOwnGroups(t *testing.T) {
 	}
 }
 
+// A subscription's own local groups (any subscription, not just the edited one)
+// must NOT be offered as detour targets — only global selectors / presets.
+func TestDetourOptions_ExcludesAllSubscriptionLocalGroups(t *testing.T) {
+	obs := []map[string]interface{}{{"tag": "proxy", "type": "selector"}}
+	proxies := []map[string]interface{}{
+		{"source": "https://x/sub1", "outbounds": []map[string]interface{}{
+			{"tag": "sub-auto", "type": "urltest"},
+		}},
+	}
+	wrap := map[string]interface{}{"ParserConfig": map[string]interface{}{"outbounds": obs, "proxies": proxies}}
+	b, err := json.Marshal(wrap)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	m := &wizardmodels.WizardModel{ParserConfigJSON: string(b)}
+
+	opts, _ := DetourOptions(m, nil, none)
+	if contains(opts, "sub-auto") {
+		t.Errorf("subscription-local group 'sub-auto' must NOT be a detour target, got %v", opts)
+	}
+	if !contains(opts, "proxy") {
+		t.Errorf("global selector 'proxy' must still be offered, got %v", opts)
+	}
+}
+
+// Built-in/service outbounds (direct-out/reject/drop) and the template's
+// auto-select group (auto-proxy-out) are never offered as detour targets.
+func TestDetourOptions_ExcludesBuiltinsAndAuto(t *testing.T) {
+	// modelWithOutbounds always seeds direct-out/reject/drop via
+	// GetAvailableOutbounds; add the auto group + a manual selector explicitly.
+	m := modelWithOutbounds(t, "auto-proxy-out", "proxy-out")
+	opts, _ := DetourOptions(m, nil, none)
+	for _, banned := range []string{"direct-out", "reject", "drop", "auto-proxy-out"} {
+		if contains(opts, banned) {
+			t.Errorf("%q must not be a detour target, got %v", banned, opts)
+		}
+	}
+	if !contains(opts, "proxy-out") {
+		t.Errorf("manual selector 'proxy-out' must still be offered, got %v", opts)
+	}
+}
+
 func TestDetourOptions_DanglingSelectionKept(t *testing.T) {
 	m := modelWithOutbounds(t, "proxy")
 	src := &configtypes.ProxySource{DetourTag: "ghost-group"} // not in available

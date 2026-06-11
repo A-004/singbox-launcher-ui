@@ -6,7 +6,7 @@
 
 ## EN
 ### Highlights
-- **Proxy chains (detour) for servers and subscriptions.** A source's Settings tab now has a **Detour server (chain)** picker: choose another outbound (a group, a built-in, or another server) and every node of that source dials through it — building a chain (client → hop → node → internet). Works for both single servers and whole subscriptions. Self-referential and cyclic chains are detected and broken automatically (the node falls back to a direct dial) so the core never rejects the config. (SPEC 077)
+- **Proxy chains (detour) for servers and subscriptions.** A source's Settings tab now has a **Detour server (chain)** picker: choose one of your manual proxy groups (the selectors you build on the Outbounds tab, plus active preset groups) and every node of that source dials through it — building a chain (client → hop → node → internet). Works for both single servers and whole subscriptions. The picker deliberately offers only those manual groups — not the built-in/service outbounds (direct-out/reject/drop), the auto-select group, a subscription's own local groups, or individual nodes. Self-referential and cyclic chains are detected and broken automatically (the node falls back to a direct dial) so the core never rejects the config. (SPEC 077)
 - **Fixed: subscriptions from panels that route the response by User-Agent.** Some panels (Remnawave/Marzban-style) match a substring of the client User-Agent and served the launcher a full sing-box client-config JSON instead of the base64/URI subscription list — which the launcher couldn't ingest (add-subscription failed/crashed on older builds). The User-Agent is now `LxBox/<v> (desktop; <os>)`: a bare `singbox` substring — the failure trigger that made panels serve JSON — is gone.
 
 ### Technical / Internal
@@ -15,7 +15,7 @@
 
 ## RU
 ### Основное
-- **Цепочки прокси (detour) для серверов и подписок.** На вкладке Settings источника появился выбор **Detour-сервер (цепочка)**: указываете другой outbound (группу, встроенный или другой сервер), и все узлы этого источника идут через него — строится цепочка (клиент → хоп → узел → интернет). Работает и для одиночного сервера, и для целой подписки. Самоссылка и циклы детектируются и разрываются автоматически (узел переходит на прямое соединение), поэтому ядро никогда не отвергнет конфиг. (SPEC 077)
+- **Цепочки прокси (detour) для серверов и подписок.** На вкладке Settings источника появился выбор **Detour-сервер (цепочка)**: указываете одну из своих ручных прокси-групп (селекторы, которые вы собираете на вкладке Outbounds, плюс активные preset-группы), и все узлы этого источника идут через неё — строится цепочка (клиент → хоп → узел → интернет). Работает и для одиночного сервера, и для целой подписки. В списке намеренно только эти ручные группы — без встроенных/служебных outbound'ов (direct-out/reject/drop), без auto-группы, без локальных групп самой подписки и без отдельных узлов. Самоссылка и циклы детектируются и разрываются автоматически (узел переходит на прямое соединение), поэтому ядро никогда не отвергнет конфиг. (SPEC 077)
 - **Исправлено: подписки от панелей, которые роутят ответ по User-Agent.** Некоторые панели (Remnawave/Marzban-типа) матчат подстроку в User-Agent клиента и отдавали лаунчеру полный sing-box JSON-конфиг вместо base64/URI-списка подписки — а его лаунчер переварить не мог (добавление подписки падало/крашилось на старых сборках). User-Agent теперь — `LxBox/<v> (desktop; <os>)`: bare `singbox`, который и был триггером (панель отдавала JSON), убран.
 
 ### Техническое / Внутреннее
