@@ -46,9 +46,17 @@ func canonicalGOOSName(goos string) string {
 //
 // Examples:
 //
-//	singbox-launcher/0.9.9 (macOS arm64)
-//	singbox-launcher/0.9.9 (windows amd64)
-//	singbox-launcher/0.9.9 (linux amd64)
+//	sing-box-launcher/0.9.9 (macOS arm64)
+//	sing-box-launcher/0.9.9 (windows amd64)
+//	sing-box-launcher/0.9.9 (linux amd64)
+//
+// The product token is "sing-box-launcher" (hyphenated) on purpose: many
+// subscription panels (Remnawave/Marzban-style) route the response body by a
+// substring match on the User-Agent. A bare "singbox" (no hyphen) is matched as
+// a non-sing-box client and the panel serves a full client config JSON instead
+// of the base64/URI subscription list the launcher expects — which the launcher
+// can't ingest. The hyphenated "sing-box" token is recognized as a real
+// sing-box client, so the panel serves the proper subscription list.
 //
 // See SPEC 061-F-N §"Request headers" §1.
 func BuildSubscriptionUserAgent() string {
@@ -57,7 +65,7 @@ func BuildSubscriptionUserAgent() string {
 	if ver == "" {
 		ver = "unknown"
 	}
-	return fmt.Sprintf("singbox-launcher/%s (%s %s)", ver, canonicalGOOSName(runtime.GOOS), runtime.GOARCH)
+	return fmt.Sprintf("sing-box-launcher/%s (%s %s)", ver, canonicalGOOSName(runtime.GOOS), runtime.GOARCH)
 }
 
 // MaxNodesPerSubscription limits the maximum number of nodes parsed from a single subscription
