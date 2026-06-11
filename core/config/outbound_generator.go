@@ -258,15 +258,27 @@ func GenerateNodeJSON(node *ParsedNode) (string, error) {
 			flowOut = f
 		}
 	}
-	// flow (xtls-rprx-vision is the only value sing-box accepts) is valid ONLY
-	// over "bare" TLS/Reality. It is incompatible with any v2ray transport
-	// (ws/grpc/http/httpupgrade/xhttp) — sing-box rejects the combination at
-	// load time. Drop flow when a transport is present so a stray flow in the
-	// URI (or an xhttp node that also carries flow) still yields a loadable
-	// config. See option/vless.go (flow,omitempty) and the XHTTP/XTLS-Vision
-	// incompatibility note in sing-box-lx docs/lx-config.md.
+	// flow has exactly two valid outputs in sing-box: "" (plain VLESS) or
+	// "xtls-rprx-vision". Two filters enforce that:
+	//
+	//  1. Transport guard — vision is valid ONLY over "bare" TLS/Reality; it is
+	//     incompatible with any v2ray transport (ws/grpc/http/httpupgrade/xhttp),
+	//     which sing-box rejects at load time. Drop flow when a transport is
+	//     present (a stray flow in the URI, or an xhttp node that also carries
+	//     one). See the XHTTP/XTLS-Vision note in sing-box-lx docs/lx-config.md.
+	//  2. Value whitelist — only "xtls-rprx-vision" is emitted. Everything else
+	//     (literal "none" that x3-ui writes, the removed xtls-rprx-direct/origin/
+	//     splice, or any junk) is NOT a value sing-box understands and would make
+	//     it reject the config — so it is dropped to "" = plain VLESS. node.Flow
+	//     keeps the original value for skip-filters; only emission is filtered.
+	//     (xtls-rprx-vision-udp443 was already normalized to xtls-rprx-vision in
+	//     buildOutbound, so it passes the whitelist.)
 	if flowOut != "" && outboundHasTransport(node.Outbound) {
 		debuglog.DebugLog("GenerateNodeJSON: dropping flow=%q on %q — incompatible with a v2ray transport", flowOut, node.Tag)
+		flowOut = ""
+	}
+	if flowOut != "" && flowOut != "xtls-rprx-vision" {
+		debuglog.DebugLog("GenerateNodeJSON: dropping unsupported flow=%q on %q — sing-box accepts only \"\" or xtls-rprx-vision", flowOut, node.Tag)
 		flowOut = ""
 	}
 	if flowOut != "" {

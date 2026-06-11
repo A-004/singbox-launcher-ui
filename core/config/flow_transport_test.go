@@ -31,6 +31,21 @@ func TestGenerateNodeJSON_FlowDroppedWithTransport(t *testing.T) {
 			uri:      "vless://a0ee37a5-1844-4087-bc5c-1db6f416d38c@h.test:443?encryption=none&flow=xtls-rprx-vision&type=tcp&security=reality&sni=h.test&pbk=BBBB&sid=64f4#t",
 			wantFlow: true,
 		},
+		{
+			name:     "flow=none bare TCP → dropped (x3-ui literal none)",
+			uri:      "vless://a0ee37a5-1844-4087-bc5c-1db6f416d38c@h.test:443?encryption=none&flow=none&type=tcp&security=reality&sni=h.test&pbk=BBBB&sid=64f4#t",
+			wantFlow: false,
+		},
+		{
+			name:     "flow=xtls-rprx-direct (deprecated) → dropped",
+			uri:      "vless://a0ee37a5-1844-4087-bc5c-1db6f416d38c@h.test:443?encryption=none&flow=xtls-rprx-direct&type=tcp&security=reality&sni=h.test&pbk=BBBB&sid=64f4#t",
+			wantFlow: false,
+		},
+		{
+			name:     "flow=xtls-rprx-vision-udp443 bare TCP → normalized vision kept",
+			uri:      "vless://a0ee37a5-1844-4087-bc5c-1db6f416d38c@h.test:443?encryption=none&flow=xtls-rprx-vision-udp443&type=tcp&security=reality&sni=h.test&pbk=BBBB&sid=64f4#t",
+			wantFlow: true,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -45,6 +60,10 @@ func TestGenerateNodeJSON_FlowDroppedWithTransport(t *testing.T) {
 			hasFlow := strings.Contains(js, `"flow"`)
 			if hasFlow != c.wantFlow {
 				t.Errorf("flow present = %v, want %v\nJSON: %s", hasFlow, c.wantFlow, js)
+			}
+			// The only emitted flow value sing-box accepts is xtls-rprx-vision.
+			if hasFlow && !strings.Contains(js, `"flow":"xtls-rprx-vision"`) {
+				t.Errorf("emitted flow must be exactly xtls-rprx-vision\nJSON: %s", js)
 			}
 		})
 	}
