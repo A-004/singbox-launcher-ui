@@ -16,8 +16,8 @@
 - [x] Хелпер `DetourOptions` в business (+ тесты); локали `wizard.source.label_detour`/`detour_none`/`detour_hint` (en + ru)
 - [x] Round-trip: `applyProxyEditToSource` пробрасывает DetourTag (+ ToProxySourceV4 при открытии); тест detour_persist_test.go (subscription/server/cleared)
 
-## Фаза 4 — докуменация
-- [ ] `docs/ParserConfig.md` + `docs/release_notes/upcoming.md`
-- [ ] golden config-фрагмент (опц. через sing-box check)
-- [ ] `IMPLEMENTATION_REPORT.md`
-- [ ] `go build ./... && go test ./... && go vet ./...`
+## Фаза 4 — докуменация ✅
+- [x] `docs/ParserConfig.md` (поле `detour_tag` в таблице proxies) + `docs/release_notes/upcoming.md` (EN/RU)
+- [x] Проверка на реальном ядре `1.13.13-lx.6`: `sing-box check` принимает цепочку, отвергает цикл
+- [x] `IMPLEMENTATION_REPORT.md`
+- [x] `go build ./... && go test ./... && go vet ./...` зелёные

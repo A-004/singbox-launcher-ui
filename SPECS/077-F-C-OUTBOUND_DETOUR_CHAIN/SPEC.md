@@ -1,4 +1,4 @@
-# SPEC 077-F-M — DETOUR-ЦЕПОЧКИ ДЛЯ SERVER / SUBSCRIPTION
+# SPEC 077-F-C — DETOUR-ЦЕПОЧКИ ДЛЯ SERVER / SUBSCRIPTION
 
 ## Цель
 
