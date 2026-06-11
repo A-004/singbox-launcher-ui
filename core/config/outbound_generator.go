@@ -258,6 +258,17 @@ func GenerateNodeJSON(node *ParsedNode) (string, error) {
 			flowOut = f
 		}
 	}
+	// flow (xtls-rprx-vision is the only value sing-box accepts) is valid ONLY
+	// over "bare" TLS/Reality. It is incompatible with any v2ray transport
+	// (ws/grpc/http/httpupgrade/xhttp) — sing-box rejects the combination at
+	// load time. Drop flow when a transport is present so a stray flow in the
+	// URI (or an xhttp node that also carries flow) still yields a loadable
+	// config. See option/vless.go (flow,omitempty) and the XHTTP/XTLS-Vision
+	// incompatibility note in sing-box-lx docs/lx-config.md.
+	if flowOut != "" && outboundHasTransport(node.Outbound) {
+		debuglog.DebugLog("GenerateNodeJSON: dropping flow=%q on %q — incompatible with a v2ray transport", flowOut, node.Tag)
+		flowOut = ""
+	}
 	if flowOut != "" {
 		parts = append(parts, fmt.Sprintf(`"flow":%s`, marshalJSONString(flowOut)))
 	}
