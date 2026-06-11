@@ -8,6 +8,20 @@
 
 ---
 
+### Выжимка (RU) — v1.1.5
+
+**Цепочки прокси (detour) + фиксы VLESS flow и User-Agent.** В настройках сервера/подписки появился выбор **Detour-сервера** — все узлы источника идут через выбранную ручную прокси-группу (цепочка клиент → хоп → узел), самоссылки и циклы разрываются автоматически. Плюс два бага, из-за которых узел мог не загрузиться: (1) VLESS `flow` теперь на выходе только `""` или `xtls-rprx-vision` — лишний flow при транспорте и мусорные значения (`none` от x3-ui, deprecated direct/origin/splice) сбрасываются; (2) User-Agent сменён на `LxBox/<v> (desktop; <os>)`, чтобы панели не отдавали JSON-конфиг вместо подписки. Миграция не нужна.
+
+**Полный список изменений:** [docs/release_notes/1-1-5.md](docs/release_notes/1-1-5.md).
+
+### Highlights (EN) — v1.1.5
+
+**Proxy chains (detour) + VLESS flow / User-Agent fixes.** Server/subscription settings now have a **Detour server** picker — every node of a source dials through the chosen manual proxy group (chain: client → hop → node), with self-references and cycles broken automatically. Plus two load-blocking fixes: (1) VLESS `flow` now only ever emits `""` or `xtls-rprx-vision` — a stray flow over a transport and junk values (`none` from x3-ui, the removed direct/origin/splice) are dropped; (2) the User-Agent is now `LxBox/<v> (desktop; <os>)` so panels stop serving a JSON config instead of the subscription. No migration needed.
+
+**Full changelog:** [docs/release_notes/1-1-5.md](docs/release_notes/1-1-5.md).
+
+---
+
 ### Выжимка (RU) — v1.1.4
 
 **Диапазонные magic-заголовки AmneziaWG 2.0.** Реальные экспорты AWG 2.0 задают `H1–H4` диапазонами (`43613244-384550127`) — раньше парсер молча выбрасывал все четыре, и handshake не сходился. Теперь диапазоны идут в ядро один в один (`"h1": "N-M"`), ядро выбирает свежее значение на каждый handshake; одиночные значения — числами, как раньше. Плюс warn-диагностика мусора и пересечений заголовков при импорте. **Требуется ядро `1.13.13-lx.6`** — обновите через Core Dashboard → Download/Reinstall.
