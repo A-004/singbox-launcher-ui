@@ -588,13 +588,16 @@ func buildDebugAPIRow(ac *core.AppController) fyne.CanvasObject {
 		refreshStatus()
 	}
 
+	// Port row: [label] [entry…stretch] [Copy API info]. The connection-card
+	// button lives here (Border right) instead of in the button row above so
+	// four buttons don't force the window wider; the port entry takes the slack.
 	portLabel := widget.NewLabel(locale.T("diag.debug_api_port_label"))
-	portRow := container.NewBorder(nil, nil, portLabel, nil, portEntry)
+	portRow := container.NewBorder(nil, nil, portLabel, copyCardBtn, portEntry)
 
 	row := container.NewVBox(
 		title,
 		hint,
-		container.NewHBox(check, copyTokenBtn, copyCardBtn, regenTokenBtn),
+		container.NewHBox(check, copyTokenBtn, regenTokenBtn),
 		portRow,
 		status,
 	)
