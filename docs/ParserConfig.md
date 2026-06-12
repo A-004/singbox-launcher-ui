@@ -4,7 +4,7 @@
 
 ## Назначение
 
-Парсер обновляет файл `bin/config.json`, загружая подписки (см. таблицу [«Поддерживаемые протоколы»](#поддерживаемые-протоколы) ниже — 9 протоколов: VLESS, VMess, Trojan, Shadowsocks, Hysteria2, SSH, SOCKS5, NaïveProxy, WireGuard), фильтруя и группируя их в селекторы. Результат записывается в секции между маркерами `/** @ParserSTART */` и `/** @ParserEND */` (outbounds), а узлы WireGuard — между `/** @ParserSTART_E */` и `/** @ParserEND_E */` (endpoints). Секция **endpoints** (WireGuard) поддерживается в sing-box начиная с версии **1.11**.
+Парсер обновляет файл `bin/config.json`, загружая подписки (см. таблицу [«Поддерживаемые протоколы»](#поддерживаемые-протоколы) ниже — 11 протоколов: VLESS, VMess, Trojan, Shadowsocks, Hysteria2, SSH, SOCKS5, NaïveProxy, WireGuard/AmneziaWG, TUIC, Amnezia (`vpn://`)), фильтруя и группируя их в селекторы. Результат записывается в секции между маркерами `/** @ParserSTART */` и `/** @ParserEND */` (outbounds), а узлы WireGuard — между `/** @ParserSTART_E */` и `/** @ParserEND_E */` (endpoints). Секция **endpoints** (WireGuard) поддерживается в sing-box начиная с версии **1.11**.
 
 ### Поддерживаемые протоколы
 
@@ -311,8 +311,8 @@ Round-trip и выборочные сценарии: `core/config/subscription/s
 
 | Поле          | Тип      | Обязательное | Описание |
 |---------------|----------|--------------|----------|
-| `source`      | string   | Да           | URL подписки. Все 9 протоколов из таблицы [«Поддерживаемые протоколы»](#поддерживаемые-протоколы): VLESS, VMess, Trojan, Shadowsocks, Hysteria2, SSH, SOCKS5, NaïveProxy, WireGuard. Допускаются Base64 и plain-текст; также **JSON-массив** полных конфигов Xray (`[ {...}, ... ]`), см. выше. |
-| `connections` | array    | Нет          | Массив прямых ссылок. Все 10 схем из таблицы [«Поддерживаемые протоколы»](#поддерживаемые-протоколы): `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`/`hy2://`, `tuic://`, `ssh://`, `socks5://`/`socks://`, `naive+https://`/`naive+quic://`, `wireguard://`. Можно комбинировать с подписками. Узлы WireGuard попадают в секцию `endpoints` конфига (sing-box ≥ 1.11). NaïveProxy требует sing-box ≥ 1.13.0 + build tag `with_naive_proxy`. Подробнее — раздел [Форматы URI для прямых ссылок](#форматы-uri-для-прямых-ссылок). |
+| `source`      | string   | Да           | URL подписки. Все 11 протоколов из таблицы [«Поддерживаемые протоколы»](#поддерживаемые-протоколы): VLESS, VMess, Trojan, Shadowsocks, Hysteria2, SSH, SOCKS5, NaïveProxy, WireGuard/AmneziaWG, TUIC, Amnezia (`vpn://`). Допускаются Base64 и plain-текст; также **JSON-массив** полных конфигов Xray (`[ {...}, ... ]`), см. выше. |
+| `connections` | array    | Нет          | Массив прямых ссылок. Все 11 схем из таблицы [«Поддерживаемые протоколы»](#поддерживаемые-протоколы): `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`/`hy2://`, `tuic://`, `ssh://`, `socks5://`/`socks://`, `naive+https://`/`naive+quic://`, `wireguard://`/`awg://`, `vpn://` (Amnezia). Можно комбинировать с подписками. Узлы WireGuard попадают в секцию `endpoints` конфига (sing-box ≥ 1.11). NaïveProxy требует sing-box ≥ 1.13.0 + build tag `with_naive_proxy`. Подробнее — раздел [Форматы URI для прямых ссылок](#форматы-uri-для-прямых-ссылок). |
 | `skip`        | array    | Нет          | Список фильтров. Если хотя бы один совпал — узел пропускается. |
 | `tag_prefix`  | string   | Нет          | Префикс, добавляемый ко всем тегам узлов из этого источника (версия 4). Применяется перед оригинальным тегом. Поддерживает переменные: `{$tag}`, `{$scheme}`, `{$protocol}`, `{$server}`, `{$port}`, `{$label}`, `{$comment}`, `{$num}`. Игнорируется, если указан `tag_mask`. |
 | `tag_postfix` | string   | Нет          | Постфикс, добавляемый ко всем тегам узлов из этого источника (версия 4). Применяется после оригинального тега. Поддерживает те же переменные, что и `tag_prefix`. Игнорируется, если указан `tag_mask`. |

@@ -322,6 +322,12 @@ Wizard (DNS tab, Rules v3, Sources, scroll gutters, row hover, per-source edit, 
 
 | Версия | Описание |
 |--------|----------|
+| **v1.1.5** | [docs/release_notes/1-1-5.md](docs/release_notes/1-1-5.md) |
+| **v1.1.4** | [docs/release_notes/1-1-4.md](docs/release_notes/1-1-4.md) |
+| **v1.1.3** | [docs/release_notes/1-1-3.md](docs/release_notes/1-1-3.md) |
+| **v1.1.2** | [docs/release_notes/1-1-2.md](docs/release_notes/1-1-2.md) |
+| **v1.1.1** | [docs/release_notes/1-1-1.md](docs/release_notes/1-1-1.md) |
+| **v1.1.0** | [docs/release_notes/1-1-0.md](docs/release_notes/1-1-0.md) |
 | **v1.0.0** | [docs/release_notes/1-0-0.md](docs/release_notes/1-0-0.md) |
 | **v0.9.9** | [docs/release_notes/0-9-9.md](docs/release_notes/0-9-9.md) |
 | **v0.9.8.1** | [docs/release_notes/0-9-8-1.md](docs/release_notes/0-9-8-1.md) |

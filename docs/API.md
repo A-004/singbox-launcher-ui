@@ -1,6 +1,6 @@
 # Debug API
 
-Локальный HTTP API на `127.0.0.1`, bearer-auth, выключен по умолчанию. **25 endpoint'ов** (24 protected + unauthenticated `/ping`) в 6 группах: health/info, state read, state write, actions, traffic profiler, snapshot. Используется для автоматизации (bash + curl), MCP-обёрток для AI-агентов, CI/CD-валидации шаблонов, headless-deployment, и для одной кнопки **Copy snapshot** в Diagnostics (это тот же `/debug/snapshot`).
+Локальный HTTP API на `127.0.0.1`, bearer-auth, выключен по умолчанию. **Самоописываемый** (SPEC 078): `GET /` отдаёт манифест, `GET /help` — список эндпоинтов, так что агенту достаточно дать base URL + токен. Группы: discovery/info, state read, state write, actions, traffic profiler, snapshot. Используется для автоматизации (bash + curl), MCP-обёрток для AI-агентов, CI/CD-валидации шаблонов, headless-deployment, и для одной кнопки **Copy snapshot** в Diagnostics (это тот же `/debug/snapshot`).
 
 > Source of truth: код `core/debugapi/`. Этот документ — generated-style сводка из реальных handler-ов; SPEC 038 описывает оригинальный дизайн и осталась как историческая референс.
 
@@ -18,7 +18,7 @@ export API="http://127.0.0.1:9263"
 # 4. Проверить
 curl -s "$API/ping"                                    # → {"ok":true}    (без auth)
 curl -s -H "Authorization: Bearer $TOKEN" "$API/version"
-# → {"launcher":"v1.1.4","singbox":"1.13.13-lx.6","api":"debugapi/v1"}
+# → {"launcher":"v1.1.5","singbox":"1.13.13-lx.6","api":"debugapi/v1"}
 ```
 
 ---
@@ -222,7 +222,7 @@ Response shape:
 ```json
 {
   "captured_at": "2026-05-28T12:00:00Z",
-  "launcher_version": "v1.1.4",
+  "launcher_version": "v1.1.5",
   "singbox_version": "1.13.13-lx.6",
   "files": { "state.json": "...", "config.json": "...", "wizard_template.json": "..." },
   "missing": [],
@@ -259,7 +259,7 @@ Response shape:
 - **Нет `GET /logs?tail=N`** — sing-box логи читать напрямую из `bin/logs/`.
 - **Нет switch_proxy / list_groups / get_logs** — упоминались в SPEC 038 §183 как future work, не реализованы.
 - **Toggle verbose** рестартит sing-box — активные TCP-соединения дропаются. Response предупреждает (`"warning":"active connections reset"`).
-- **Token rotation** — нет UI; ручной flow: stop launcher → удалить `debug_api_token` из `bin/settings.json` → start launcher → токен будет регенерирован при первом включении.
+- **Token rotation** — кнопка **Settings → Debug API → «Regenerate»** (с подтверждением; ротирует токен и перезапускает listener). Альтернатива без UI: stop launcher → удалить `debug_api_token` из `bin/settings.json` → start launcher → токен будет регенерирован при первом включении.
 
 ---
 
