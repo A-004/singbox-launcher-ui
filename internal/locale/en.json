@@ -678,6 +678,7 @@
   "core.restart_menu_full_when_stopped": "Rebuild & start sing-box",
   "wizard.source.button_refresh_tooltip": "Re-fetch subscription URLs over the network and rebuild config.json (Cmd/Ctrl+U also works)",
   "core.state_select_placeholder": "Switch state…",
+  "core.state_current_option": "● Current (active)",
   "core.state_save_as_button": "💾 Save state as…",
   "core.state_save_as_dialog_title": "Save current state",
   "core.state_save_as_dialog_prompt": "Name (filename-safe):",

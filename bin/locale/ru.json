@@ -673,6 +673,7 @@
   "core.restart_menu_full_when_stopped": "Пересобрать и запустить sing-box",
   "wizard.source.button_refresh_tooltip": "Заново скачать URL'ы подписок и пересобрать config.json (Cmd/Ctrl+U тоже работает)",
   "core.state_select_placeholder": "Сменить state…",
+  "core.state_current_option": "● Текущее (активно)",
   "core.state_save_as_button": "💾 Сохранить state как…",
   "core.state_save_as_dialog_title": "Сохранить текущий state",
   "core.state_save_as_dialog_prompt": "Имя (только латиница / цифры / дефисы):",
