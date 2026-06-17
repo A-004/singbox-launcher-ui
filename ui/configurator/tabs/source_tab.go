@@ -821,7 +821,11 @@ func CreateOutboundsAndParserConfigTab(presenter *wizardpresentation.WizardPrese
 	)
 
 	scrollContainer := container.NewScroll(content)
-	scrollContainer.SetMinSize(fyne.NewSize(0, 620))
+	// Adaptive min-height: a fixed 620px forced the whole wizard window taller
+	// than small laptop screens (Big Sur 1280×800), pushing nav buttons under
+	// the Dock. Scale with window height; the fallback (used before the window
+	// is measured at first layout) is kept small enough to fit a 600px window.
+	scrollContainer.SetMinSize(adaptiveScrollSize(guiState, 0.62, 440))
 
 	return scrollContainer
 }
