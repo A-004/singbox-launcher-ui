@@ -245,7 +245,7 @@ func main() {
 	// Create App structure to manage UI
 	app := ui.NewApp(controller.UIService.MainWindow, controller)
 	controller.UIService.MainWindow.SetContent(fynetooltip.AddWindowToolTipLayer(app.GetContent(), controller.UIService.MainWindow.Canvas()))
-	controller.UIService.MainWindow.Resize(fyne.NewSize(350, 450)) // initial window size
+	controller.UIService.MainWindow.Resize(fyne.NewSize(320, 560)) // initial window size
 	controller.UIService.MainWindow.CenterOnScreen()               // Center the window on the screen
 
 	core.CheckIfLauncherAlreadyRunningUtil()

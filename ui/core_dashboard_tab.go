@@ -74,15 +74,28 @@ type CoreDashboardTab struct {
 	wintunDownloadInProgress bool // Flag for wintun.dll download process
 }
 
+// outlinedCard wraps any content in a white-outlined rounded rectangle card.
+// No fixed min sizes — content dimensions determine the card size freely.
+func outlinedCard(content fyne.CanvasObject) fyne.CanvasObject {
+	whiteBg := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	whiteBg.CornerRadius = 16
+	blackBg := canvas.NewRectangle(color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff})
+	blackBg.CornerRadius = 12
+	wrapped := container.NewPadded(content)
+	return container.NewStack(whiteBg, blackBg, wrapped)
+}
+
 // CreateCoreDashboardTab creates and returns the Core Dashboard tab
 func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 	tab := &CoreDashboardTab{
 		controller: ac,
 	}
 
-	// Status block with buttons in one row
-	statusRow := tab.createStatusRow()
+	// Group 1: Tab bar is already in app.go. Here we build the scrollable body.
+	// Group 2: VPN Power card
+	statusCard := tab.createStatusRow()
 
+	// Group 3: Statuses (sing-box, wintun, config) in one card
 	versionBlock := tab.createVersionBlock()
 	configBlock := tab.createConfigBlock()
 
@@ -96,31 +109,28 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 		coreRows = append(coreRows, wintunBlock)
 	}
 	coreRows = append(coreRows, configBlock)
-	coreInfo := container.NewVBox(coreRows...)
+	coreInfo := outlinedCard(container.NewVBox(coreRows...))
 
-	contentItems := []fyne.CanvasObject{
-		statusRow,
-		widget.NewSeparator(),
-		coreInfo,
-		widget.NewSeparator(),
-		tab.createStateBlock(),
-		widget.NewSeparator(),
-	}
-
-	// Горизонтальная линия и кнопка Exit в конце списка
+	// Group 4: State + Exit in one card
+	stateBlock := tab.createStateBlock()
 	exitButton := widget.NewButton(locale.T("core.button_exit"), ac.GracefulExit)
-	// Кнопка Exit в отдельной строке с отступом вниз
-	contentItems = append(contentItems, widget.NewLabel("")) // Отступ
-	contentItems = append(contentItems, container.NewCenter(exitButton))
+	exitRow := container.NewCenter(exitButton)
+	stateCard := outlinedCard(container.NewVBox(
+		stateBlock,
+		widget.NewLabel(""),
+		exitRow,
+	))
 
-	// SPEC 052 phase 8 polish: subscription status panel под Exit'ом —
-	// log потока операции + finалный toast (×, ✓/✗, auto-hide 20s).
-	// Сепаратор перед панелью убран: панель сама невидима пока нет
-	// активной операции, и торчащая горизонтальная линия после Exit
-	// в idle-состоянии выглядела как visual noise.
-	contentItems = append(contentItems, tab.createSubsStatusBlock())
+	// Group 5: Subscription toast
+	toastBlock := tab.createSubsStatusBlock()
 
-	content := container.NewVBox(contentItems...)
+	body := container.NewVBox(
+		statusCard,
+		coreInfo,
+		stateCard,
+		toastBlock,
+	)
+	content := container.NewScroll(body)
 
 	// Регистрируем callback для обновления статуса при изменении RunningState
 	// Сохраняем оригинальный callback, если он есть
@@ -208,19 +218,19 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 	return content
 }
 
-// createStatusRow creates a compact Apple-style status section with a square power button.
+// createStatusRow — Apple-style VPN power card with a single ON/OFF button
+// (same position, changes label) inside a white outlined rounded rectangle.
 func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 	tab.statusLabel = widget.NewLabel(locale.T("core.status_checking"))
 	tab.statusLabel.Wrapping = fyne.TextWrapOff
 	tab.statusLabel.Alignment = fyne.TextAlignCenter
 	tab.statusLabel.Importance = widget.MediumImportance
 
-	// Square ON/OFF power button (Apple-style minimal toggle)
+	// Single power button (text toggles ON/OFF, position stays fixed)
 	powerBtn := widget.NewButton("OFF", func() {
 		core.StartSingBoxProcess()
 	})
 	powerBtn.Importance = widget.HighImportance
-	powerBtn.Resize(fyne.NewSize(80, 80))
 
 	stopButton := widget.NewButton("ON", func() {
 		core.StopSingBoxProcess()
@@ -228,7 +238,6 @@ func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 	stopButton.Importance = widget.HighImportance
 	stopButton.Hide()
 
-	// Rebuild button: icon-less text
 	restartButton := ttwidget.NewButton("[R]", nil)
 	restartButton.Importance = widget.MediumImportance
 	restartButton.SetToolTip(fmt.Sprintf(locale.T("core.button_restart_tooltip"), platform.ShortcutModifierLabel()))
@@ -325,55 +334,39 @@ func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 		pop.ShowAtPosition(fyne.NewPos(pos.X, pos.Y+restartButton.Size().Height))
 	}
 
-	// "VPN" title above the power card
+	// VPN card: white outline + black fill, rounded corners.
+	// Content: "VPN" title, status, [OFF/ON] + [R]
 	vpnTitle := widget.NewLabelWithStyle("VPN", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 
-	// Admin warning for Windows (shown only when NOT running as admin).
+	// ON/OFF in same position — stacked so toggle doesn't shift layout.
+	onOffStack := container.NewStack(powerBtn, stopButton)
+
+	btnRow := container.NewCenter(container.NewHBox(
+		container.NewPadded(container.NewCenter(onOffStack)),
+		container.NewPadded(container.NewCenter(restartButton)),
+	))
+
+	// Card frame — no fixed min sizes, content drives the card dimensions.
+	whiteOutline := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	whiteOutline.CornerRadius = 16
+
+	cardInner := canvas.NewRectangle(color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff})
+	cardInner.CornerRadius = 12
+
+	cardContent := container.NewPadded(container.NewVBox(
+		container.NewPadded(container.NewCenter(vpnTitle)),
+		container.NewPadded(container.NewCenter(tab.statusLabel)),
+		btnRow,
+	))
+
+	card := container.NewStack(whiteOutline, cardInner, cardContent)
+	centered := container.NewCenter(card)
+
+	rows := []fyne.CanvasObject{centered}
 	var adminBanner fyne.CanvasObject
 	if isRunningOnWindowsWithoutElevation() {
-		adminBanner = widget.NewLabel("Not running as admin. TUN may fail.")
-	}
-
-	// Inner card — two rows inside a white-outlined square:
-	//   Row 1: status label
-	//   Row 2: [OFF] [R]  or  [ON] [R]
-	innerRow := container.NewHBox(
-		container.NewPadded(powerBtn),
-		container.NewPadded(restartButton),
-		container.NewPadded(stopButton),
-	)
-	// White outline card with rounded corners.
-	// Uses a Border layout with a padded inner area.
-	// The white outline is achieved via the container padding around the inner box.
-	titleBox := container.NewCenter(vpnTitle)
-
-	// Stack two rectangles: white outer (border) + black inner, then content on top.
-	whiteBg := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
-	whiteBg.CornerRadius = 14
-	whiteBg.SetMinSize(fyne.NewSize(180, 200))
-
-	blackBg := canvas.NewRectangle(color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff})
-	blackBg.CornerRadius = 10
-	blackBg.SetMinSize(fyne.NewSize(172, 192))
-
-	contentBox := container.NewVBox(
-		container.NewPadded(titleBox),
-		container.NewPadded(container.NewCenter(tab.statusLabel)),
-		container.NewCenter(innerRow),
-	)
-	contentPadded := container.NewPadded(contentBox)
-
-	card := container.NewStack(whiteBg, blackBg, contentPadded)
-	buttonsContainer := container.NewCenter(card)
-
-	rows := []fyne.CanvasObject{
-		widget.NewLabel(""), // top margin
-		buttonsContainer,
-		widget.NewLabel(""), // bottom margin
-	}
-	if adminBanner != nil {
-		// Insert banner after top margin, before buttons
-		rows = append(rows[:1], append([]fyne.CanvasObject{adminBanner}, rows[1:]...)...)
+		adminBanner = container.NewPadded(widget.NewLabel("Not running as admin. TUN may fail."))
+		rows = append([]fyne.CanvasObject{adminBanner}, rows...)
 	}
 
 	return container.NewVBox(rows...)

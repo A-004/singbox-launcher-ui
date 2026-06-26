@@ -104,13 +104,19 @@ func NewApp(window fyne.Window, controller *core.AppController) *App {
 		}
 		tabBarItems = append(tabBarItems, btn)
 	}
-	tabBar := container.NewHBox(tabBarItems...)
+	tabBar := container.NewCenter(container.NewHBox(tabBarItems...))
 
-	// Wrap tab bar in a centered row
-	tabBarCenter := container.NewCenter(tabBar)
+	// Wrap tab bar in a white-outlined rounded card
+	whiteBg := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	whiteBg.CornerRadius = 16
+	blackBg := canvas.NewRectangle(color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff})
+	blackBg.CornerRadius = 12
 
-	// Main layout: tab bar on top, content below
-	mainContent := container.NewBorder(tabBarCenter, nil, nil, nil, app.tabContentBox)
+	wrappedTabBar := container.NewPadded(tabBar)
+	tabCard := container.NewStack(whiteBg, blackBg, wrappedTabBar)
+
+	// Main layout: tab bar card on top, content below
+	mainContent := container.NewBorder(tabCard, nil, nil, nil, app.tabContentBox)
 	app.content = mainContent
 
 	// Core tab status refresh
