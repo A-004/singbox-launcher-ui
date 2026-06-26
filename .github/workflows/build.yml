@@ -21,6 +21,10 @@ jobs:
       - name: Install rsrc (icon embedder)
         run: go install github.com/akavel/rsrc@latest
 
+      - name: Tidy modules
+        run: go mod tidy
+        shell: cmd
+
       - name: Embed icon
         run: rsrc -ico assets/app.ico -manifest app.manifest -o rsrc.syso
         shell: cmd
