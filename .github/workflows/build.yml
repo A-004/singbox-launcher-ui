@@ -1,0 +1,38 @@
+name: Build custom singbox-launcher
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install MinGW (for CGO)
+        run: choco install mingw -y --no-progress
+        shell: cmd
+
+      - name: Install rsrc (icon embedder)
+        run: go install github.com/akavel/rsrc@latest
+
+      - name: Embed icon
+        run: rsrc -ico assets/app.ico -manifest app.manifest -o rsrc.syso
+        shell: cmd
+
+      - name: Build
+        run: |
+          set CGO_ENABLED=1
+          go build -buildvcs=false -ldflags="-H windowsgui -s -w" -o singbox-launcher.exe
+        shell: cmd
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: singbox-launcher-custom
+          path: singbox-launcher.exe
