@@ -51,8 +51,8 @@ func (tab *CoreDashboardTab) setSubsToastInProgress(title, subtitle string) {
 		tab.subsToastTimer = nil
 	}
 
-	// Нейтральная иконка ⋯ (waiting).
-	icon := canvas.NewText("⋯", color.NRGBA{R: 100, G: 140, B: 220, A: 255})
+	// Нейтральная иконка waiting.
+	icon := canvas.NewText("...", color.NRGBA{R: 140, G: 140, B: 150, A: 255})
 	icon.TextSize = 22
 	icon.TextStyle = fyne.TextStyle{Bold: true}
 
@@ -94,12 +94,12 @@ func (tab *CoreDashboardTab) setSubsToastResult(message string, success bool) {
 
 	var icon fyne.CanvasObject
 	if success {
-		t := canvas.NewText("✓", color.NRGBA{R: 60, G: 200, B: 80, A: 255})
+		t := canvas.NewText("OK", color.NRGBA{R: 60, G: 200, B: 80, A: 255})
 		t.TextSize = 22
 		t.TextStyle = fyne.TextStyle{Bold: true}
 		icon = t
 	} else {
-		t := canvas.NewText("✗", color.NRGBA{R: 220, G: 70, B: 70, A: 255})
+		t := canvas.NewText("XX", color.NRGBA{R: 220, G: 70, B: 70, A: 255})
 		t.TextSize = 22
 		t.TextStyle = fyne.TextStyle{Bold: true}
 		icon = t

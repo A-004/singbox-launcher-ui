@@ -10,7 +10,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"singbox-launcher/api"
@@ -285,16 +284,11 @@ func OpenLogViewerWindow(ac *core.AppController) {
 	coreTop := container.NewHBox(coreRefreshBtn)
 	coreContent := container.NewBorder(coreTop, nil, nil, nil, coreList)
 
-	// Tabs
-	tabs := container.NewAppTabs(
-		container.NewTabItemWithIcon(locale.T("log.internal_tab"), theme.DocumentIcon(), internalContent),
-		container.NewTabItemWithIcon(locale.T("log.core_tab"), theme.ViewRefreshIcon(), coreContent),
-		container.NewTabItemWithIcon(locale.T("log.api_tab"), theme.MailComposeIcon(), apiContent),
-	)
+	// Custom thin tab strip with square outline (replaces AppTabs thick underline)
+	tabLabels := []string{locale.T("log.internal_tab"), locale.T("log.core_tab"), locale.T("log.api_tab")}
+	tabContents := []fyne.CanvasObject{internalContent, coreContent, apiContent}
 	coreTabIndex = 1
-
-	tabs.OnSelected = func(t *container.TabItem) {
-		idx := tabs.SelectedIndex()
+	tabBar, tabStack, tabSelectFn := customTabstrip(tabLabels, tabContents, func(idx int) {
 		if idx == coreTabIndex {
 			if coreTickStop != nil {
 				coreTickStop()
@@ -326,7 +320,9 @@ func OpenLogViewerWindow(ac *core.AppController) {
 				coreTickStop = nil
 			}
 		}
-	}
+	})
+	tabSelectFn(0)
+	tabs := container.NewBorder(tabBar, nil, nil, nil, tabStack)
 
 	win.SetContent(tabs)
 

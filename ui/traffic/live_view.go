@@ -164,21 +164,21 @@ func buildLiveView(deps WindowDeps) *liveView {
 	// current snapshot without it scrolling away. The background profiler
 	// keeps recording (the rolling buffer + any active session continue);
 	// only the in-tab append is gated. Toggle flips on each click.
-	pauseBtn := widget.NewButton("⏸ Pause", nil)
+	pauseBtn := widget.NewButton("|| Pause", nil)
 	pauseBtn.OnTapped = func() {
 		v.mu.Lock()
 		v.paused = !v.paused
 		paused := v.paused
 		v.mu.Unlock()
 		if paused {
-			pauseBtn.SetText("▶ Resume")
+			pauseBtn.SetText("> Resume")
 		} else {
-			pauseBtn.SetText("⏸ Pause")
+			pauseBtn.SetText("|| Pause")
 		}
 	}
 	// Clear — drops local view buffer (does NOT touch profiler's rolling
 	// buffer or any recording session). Cheap reset for noisy screens.
-	clearBtn := widget.NewButton("🗑 Clear", func() {
+	clearBtn := widget.NewButton("[] Clear", func() {
 		v.mu.Lock()
 		v.events = v.events[:0]
 		v.mu.Unlock()

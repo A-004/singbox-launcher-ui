@@ -38,17 +38,16 @@ func InitWizardOverlay(app *App, controller *core.AppController) {
 	}
 
 	if !wizardOverlayEnabled {
-		// Main-window overlay disabled — leave app.content as the bare tabs
-		// so input passes through to Update / Restart / tab buttons even
-		// while the configurator is open.
-		app.content = app.tabs
+		// Main-window overlay disabled — app.content is already set by NewApp.
+		// Input passes through to Update / Restart / tab buttons even while
+		// the configurator is open.
 		return
 	}
 
 	// Create overlay widget and attach it on top of the tabs
 	overlay := components.NewClickRedirect(controller)
 	app.overlay = overlay
-	app.content = container.NewStack(app.tabs, overlay)
+	app.content = container.NewStack(app.GetContent(), overlay)
 
 	// Subscribe to UIService.OnStateChange to keep overlay visibility in sync
 	if controller.UIService != nil {

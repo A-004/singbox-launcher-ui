@@ -37,8 +37,12 @@ type UserTheme struct {
 	Error               *string `json:"Error,omitempty"`
 }
 
-// CyberAppleTheme gives the launcher a restrained black and white surface
-// with a small violet accent and squared-off controls.
+// CyberAppleTheme implements Apple Human Interface Guidelines:
+// - Strict black-and-white palette (iOS System colors)
+// - Generous whitespace (padding 12–20)
+// - Squircle corners (8–12px radius)
+// - SF System font (via Fyne default)
+// - Minimal hierarchy: pure contrast, no colored accents
 type CyberAppleTheme struct {
 	userTheme UserTheme
 }
@@ -179,58 +183,58 @@ func (t *CyberAppleTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVari
 
 	switch name {
 	case theme.ColorNameBackground:
-		return color.NRGBA{R: 0x08, G: 0x09, B: 0x0d, A: 0xff}
+		return color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff}
 	case theme.ColorNameForeground:
-		return color.NRGBA{R: 0xf6, G: 0xf7, B: 0xfb, A: 0xff}
-	case theme.ColorNameButton:
-		return color.NRGBA{R: 0x16, G: 0x17, B: 0x1d, A: 0xe8}
-	case theme.ColorNameDisabledButton:
-		return color.NRGBA{R: 0x11, G: 0x12, B: 0x16, A: 0xb8}
-	case theme.ColorNameDisabled:
-		return color.NRGBA{R: 0x74, G: 0x77, B: 0x82, A: 0xff}
-	case theme.ColorNamePlaceHolder:
-		return color.NRGBA{R: 0x9a, G: 0x9d, B: 0xaa, A: 0xff}
-	case theme.ColorNamePrimary, theme.ColorNameHyperlink:
-		return color.NRGBA{R: 0x9b, G: 0x6d, B: 0xff, A: 0xff}
-	case theme.ColorNameForegroundOnPrimary:
 		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
+	case theme.ColorNameButton:
+		return color.NRGBA{R: 0x1c, G: 0x1c, B: 0x1e, A: 0xff}
+	case theme.ColorNameDisabledButton:
+		return color.NRGBA{R: 0x2c, G: 0x2c, B: 0x2e, A: 0xff}
+	case theme.ColorNameDisabled:
+		return color.NRGBA{R: 0x63, G: 0x63, B: 0x66, A: 0xff}
+	case theme.ColorNamePlaceHolder:
+		return color.NRGBA{R: 0x8e, G: 0x8e, B: 0x93, A: 0xff}
+	case theme.ColorNamePrimary, theme.ColorNameHyperlink:
+		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
+	case theme.ColorNameForegroundOnPrimary:
+		return color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff}
 	case theme.ColorNameFocus:
-		return color.NRGBA{R: 0x9b, G: 0x6d, B: 0xff, A: 0x66}
+		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x40}
 	case theme.ColorNameHover:
-		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x0f}
+		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x10}
 	case theme.ColorNamePressed:
-		return color.NRGBA{R: 0x9b, G: 0x6d, B: 0xff, A: 0x2e}
+		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x1e}
 	case theme.ColorNameSelection:
-		return color.NRGBA{R: 0x9b, G: 0x6d, B: 0xff, A: 0x3a}
+		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x2e}
 	case theme.ColorNameInputBackground:
-		return color.NRGBA{R: 0x0f, G: 0x10, B: 0x16, A: 0xf2}
+		return color.NRGBA{R: 0x1c, G: 0x1c, B: 0x1e, A: 0xff}
 	case theme.ColorNameInputBorder, theme.ColorNameSeparator:
-		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x14}
+		return color.NRGBA{R: 0x38, G: 0x38, B: 0x3a, A: 0xff}
 	case theme.ColorNameHeaderBackground, theme.ColorNameMenuBackground:
-		return color.NRGBA{R: 0x0d, G: 0x0e, B: 0x14, A: 0xf8}
+		return color.NRGBA{R: 0x11, G: 0x11, B: 0x13, A: 0xff}
 	case theme.ColorNameOverlayBackground:
-		return color.NRGBA{R: 0x13, G: 0x14, B: 0x1c, A: 0xf4}
+		return color.NRGBA{R: 0x11, G: 0x11, B: 0x13, A: 0xf5}
 	case theme.ColorNameScrollBar:
-		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x38}
+		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x3c}
 	case theme.ColorNameScrollBarBackground:
 		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x0a}
 	case theme.ColorNameShadow:
-		return color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0x88}
+		return color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xcc}
 	case theme.ColorNameSuccess:
-		return color.NRGBA{R: 0x32, G: 0xd5, B: 0x83, A: 0xff}
+		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
 	case theme.ColorNameWarning:
-		return color.NRGBA{R: 0xff, G: 0xcc, B: 0x66, A: 0xff}
+		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
 	case theme.ColorNameError:
-		return color.NRGBA{R: 0xff, G: 0x5c, B: 0x7a, A: 0xff}
+		return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
 	case theme.ColorNameForegroundOnError, theme.ColorNameForegroundOnSuccess, theme.ColorNameForegroundOnWarning:
-		return color.NRGBA{R: 0x05, G: 0x06, B: 0x09, A: 0xff}
+		return color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff}
 	default:
 		return theme.DarkTheme().Color(name, variant)
 	}
 }
 
 func (t *CyberAppleTheme) Font(style fyne.TextStyle) fyne.Resource {
-	return theme.DarkTheme().Font(style)
+	return theme.DefaultTextFont()
 }
 
 func (t *CyberAppleTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
@@ -240,25 +244,29 @@ func (t *CyberAppleTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
 func (t *CyberAppleTheme) Size(name fyne.ThemeSizeName) float32 {
 	switch name {
 	case theme.SizeNamePadding:
-		return 8
-	case theme.SizeNameInnerPadding:
 		return 10
-	case theme.SizeNameInputRadius, theme.SizeNameSelectionRadius, theme.SizeNameScrollBarRadius:
-		return 2
+	case theme.SizeNameInnerPadding:
+		return 8
+	case theme.SizeNameInputRadius:
+		return 8
+	case theme.SizeNameSelectionRadius:
+		return 8
+	case theme.SizeNameScrollBarRadius:
+		return 4
 	case theme.SizeNameInputBorder:
 		return 1
 	case theme.SizeNameSeparatorThickness:
-		return 0.5
+		return 0.2
 	case theme.SizeNameText:
-		return 14
+		return 13
 	case theme.SizeNameCaptionText:
 		return 11
 	case theme.SizeNameHeadingText:
 		return 22
 	case theme.SizeNameSubHeadingText:
-		return 17
+		return 16
 	case theme.SizeNameInlineIcon:
-		return 19
+		return 18
 	default:
 		return theme.DarkTheme().Size(name)
 	}

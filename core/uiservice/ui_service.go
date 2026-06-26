@@ -8,10 +8,9 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/driver/desktop"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"singbox-launcher/internal/constants"
+	"singbox-launcher/internal/apptheme"
 	"singbox-launcher/internal/debuglog"
 )
 
@@ -113,15 +112,11 @@ func NewUIService(appIconData, greyIconData, greenIconData, redIconData []byte,
 	ui.Application = app.NewWithID("com.singbox.launcher")
 	ui.Application.SetIcon(ui.AppIconData)
 
-	// Set theme based on constants
-	switch constants.AppTheme {
-	case "dark":
-		ui.Application.Settings().SetTheme(theme.DarkTheme())
-	case "light":
-		ui.Application.Settings().SetTheme(theme.LightTheme())
-	default:
-		ui.Application.Settings().SetTheme(theme.DefaultTheme())
-	}
+	// Set Apple-style black-and-white theme (CyberAppleTheme).
+	// The theme is purely monochrome with squircle corners and
+	// generous whitespace per Apple HIG. Ignore constants.AppTheme
+	// — we always use our custom theme.
+	ui.Application.Settings().SetTheme(apptheme.NewCyberAppleTheme())
 
 	// Initialize callbacks with default no-op handlers
 	ui.RefreshAPIFunc = func() { debuglog.DebugLog("RefreshAPIFunc handler is not set yet.") }

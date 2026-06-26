@@ -198,7 +198,7 @@ func CreateDiagnosticsTab(ac *core.AppController) fyne.CanvasObject {
 
 	const alwaysOnlineSTUNURL = "https://github.com/pradt2/always-online-stun?tab=readme-ov-file#always-online-stun-servers"
 
-	stunSettingsButton := widget.NewButton("⚙", func() {
+	stunSettingsButton := widget.NewButton("[*]", func() {
 		serverEntry := widget.NewEntry()
 		serverEntry.SetPlaceHolder(constants.DefaultSTUNServer)
 		serverEntry.SetText(stunServerAddr)

@@ -104,8 +104,8 @@ func collectRows(pc *config.ParserConfig, presetTagToLabel map[string]string, re
 		//
 		// SourceLabel — атрибуция строки для пользователя. Для per-source
 		// outbound'ов = название подписки; для global emit'им только то,
-		// что несёт смысл: 🔒 (required template / preset-locked), имя
-		// пресета, ✏ (USER patch). Плоское «Global» убрано как шум:
+		// что несёт смысл: ◆ (required template / preset-locked), имя
+		// пресета, ✎ (USER patch). Плоское «Global» убрано как шум:
 		// глобальные строки и так визуально отличаются от per-source
 		// отсутствием source-метки, дублировать слово на каждой строке
 		// лишнее.
@@ -113,14 +113,14 @@ func collectRows(pc *config.ParserConfig, presetTagToLabel map[string]string, re
 		case ob.Ref == "":
 			// Direct — full ownership. Без суффикса.
 		case ob.Ref == config.RefTemplate:
-			// Referenced template. Помечаем только если required (🔒).
+			// Referenced template. Помечаем только если required (◆).
 			// Non-required template визуально == direct: разница для
 			// юзера проявляется через Edit-диалог (live body из шаблона)
 			// и кнопку Restore missing.
 			row.IsTemplate = true
 			row.IsRequired = requiredTags != nil && requiredTags[ob.Tag]
 			if row.IsRequired {
-				row.SourceLabel = "🔒"
+				row.SourceLabel = "◆"
 			}
 		default:
 			// Referenced preset — имя пресета осмысленно (preset_id ↔ origin).
@@ -134,14 +134,14 @@ func collectRows(pc *config.ParserConfig, presetTagToLabel map[string]string, re
 			if row.PresetLabel == "" {
 				row.PresetLabel = ob.Ref // fallback (dangling)
 			}
-			row.SourceLabel = "🔒 " + row.PresetLabel
+			row.SourceLabel = "<> " + row.PresetLabel
 		}
 		// USER patch badge (✏) — для referenced entries с пользовательской правкой.
 		if hasUserPatch && (row.IsTemplate || row.IsPreset) {
 			if row.SourceLabel != "" {
 				row.SourceLabel += " "
 			}
-			row.SourceLabel += "✏"
+			row.SourceLabel += " [edit]"
 		}
 		rows = append(rows, row)
 	}

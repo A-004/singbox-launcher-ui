@@ -112,7 +112,7 @@ func (ac *AppController) buildProxySubmenu(selectedGroup string) *fyne.Menu {
 				}()
 			})
 			if pName == activeProxy {
-				menuItem.Label = "✓ " + display
+				menuItem.Label = "\u2714 " + display
 			}
 			items = append(items, menuItem)
 		}
@@ -156,7 +156,7 @@ func (ac *AppController) addHideDockMenuItem(menuItems []*fyne.MenuItem) []*fyne
 	hideDockEnabled := ac.UIService.HideAppFromDock
 	hideDockLabel := locale.T("tray.hide_app_from_dock")
 	if hideDockEnabled {
-		hideDockLabel = "✓ " + hideDockLabel
+		hideDockLabel = "\u2714 " + hideDockLabel
 	}
 
 	menuItems = append(menuItems, fyne.NewMenuItem(hideDockLabel, func() {

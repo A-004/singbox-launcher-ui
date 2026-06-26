@@ -34,10 +34,8 @@ func (tab *CoreDashboardTab) updateBinaryStatus() {
 
 // updateRunningStatus обновляет статус Running/Stopped на основе RunningState
 func (tab *CoreDashboardTab) updateRunningStatus() {
-	// Get button state from centralized function (same logic as Tray Menu)
 	buttonState := tab.controller.GetVPNButtonState()
 
-	// Update status label based on state
 	restartInfo := ""
 	if tab.controller.ConsecutiveCrashAttempts > 0 {
 		restartInfo = fmt.Sprintf(" [restart %d/%d]", tab.controller.ConsecutiveCrashAttempts, 3)
@@ -45,35 +43,38 @@ func (tab *CoreDashboardTab) updateRunningStatus() {
 
 	if !buttonState.BinaryExists {
 		tab.statusLabel.SetText(locale.T("core.status_error_not_found") + restartInfo)
-		tab.statusLabel.Importance = widget.MediumImportance // Текст всегда черный
+		tab.statusLabel.Importance = widget.MediumImportance
 	} else if buttonState.IsRunning {
 		tab.statusLabel.SetText(locale.T("core.status_running") + restartInfo)
-		tab.statusLabel.Importance = widget.MediumImportance // Текст всегда черный
+		tab.statusLabel.Importance = widget.MediumImportance
 	} else {
 		tab.statusLabel.SetText(locale.T("core.status_stopped") + restartInfo)
-		tab.statusLabel.Importance = widget.MediumImportance // Текст всегда черный
+		tab.statusLabel.Importance = widget.MediumImportance
 	}
 
-	// Update buttons based on centralized state
-	if tab.startButton != nil {
-		if buttonState.StartEnabled {
-			tab.startButton.Enable()
-			tab.startButton.Importance = widget.HighImportance // Синяя кнопка, когда доступна
-			tab.startButton.Refresh()
-		} else {
-			tab.startButton.Disable()
-			tab.startButton.Importance = widget.MediumImportance // Обычная, когда недоступна
-			tab.startButton.Refresh()
-		}
-	}
-	if tab.stopButton != nil {
-		if buttonState.StopEnabled {
+	// Toggle ON/OFF power button labels and visibility
+	if tab.startButton != nil && tab.stopButton != nil {
+		powerOn := buttonState.IsRunning
+		if powerOn {
+			tab.startButton.Hide()
+			tab.stopButton.Show()
 			tab.stopButton.Enable()
 			tab.stopButton.Importance = widget.HighImportance
-			tab.stopButton.Refresh()
 		} else {
-			tab.stopButton.Disable()
-			tab.stopButton.Importance = widget.MediumImportance
+			tab.startButton.Show()
+			tab.stopButton.Hide()
+			if buttonState.StartEnabled {
+				tab.startButton.Enable()
+				tab.startButton.Importance = widget.HighImportance
+			} else {
+				tab.startButton.Disable()
+				tab.startButton.Importance = widget.MediumImportance
+			}
+		}
+		if tab.startButton.Refresh != nil {
+			tab.startButton.Refresh()
+		}
+		if tab.stopButton.Refresh != nil {
 			tab.stopButton.Refresh()
 		}
 	}
@@ -106,7 +107,7 @@ func (tab *CoreDashboardTab) updateRunningStatus() {
 		// Сбрасывается ProcessService.Start после RebuildConfigIfDirty
 		// (см. core/rebuild.go).
 		restartTooltip := fmt.Sprintf(locale.T("core.button_restart_tooltip"), platform.ShortcutModifierLabel())
-		tab.restartButton.SetText("🔄")
+		tab.restartButton.SetText("[R]")
 		if tab.controller.StateService != nil && tab.controller.StateService.IsConfigStale() {
 			tab.restartButton.Importance = widget.HighImportance
 			tab.restartButton.SetToolTip(locale.T("core.restart_dirty_tooltip") + " — " + restartTooltip)

@@ -208,27 +208,31 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 	return content
 }
 
-// createStatusRow creates a row with status and buttons
+// createStatusRow creates a compact Apple-style status section with a square power button.
 func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
-	// Объединяем все в один label: "Core Status" + иконка + текст статуса
 	tab.statusLabel = widget.NewLabel(locale.T("core.status_checking"))
-	tab.statusLabel.Wrapping = fyne.TextWrapOff       // Отключаем перенос текста
-	tab.statusLabel.Alignment = fyne.TextAlignLeading // Выравнивание текста
+	tab.statusLabel.Wrapping = fyne.TextWrapOff
+	tab.statusLabel.Alignment = fyne.TextAlignCenter
 	tab.statusLabel.Importance = widget.MediumImportance
 
-	startButton := widget.NewButton(locale.T("core.button_start"), func() {
+	// Square ON/OFF power button (Apple-style minimal toggle)
+	powerBtn := widget.NewButton("OFF", func() {
 		core.StartSingBoxProcess()
-		// Status will be updated automatically via UpdateCoreStatusFunc
 	})
+	powerBtn.Importance = widget.HighImportance
+	powerBtn.Resize(fyne.NewSize(80, 80))
 
-	stopButton := widget.NewButton(locale.T("core.button_stop"), func() {
+	stopButton := widget.NewButton("ON", func() {
 		core.StopSingBoxProcess()
 	})
+	stopButton.Importance = widget.HighImportance
+	stopButton.Hide()
 
-	restartButton := ttwidget.NewButton("🔄", nil)
+	// Rebuild button: icon-less text
+	restartButton := ttwidget.NewButton("[R]", nil)
 	restartButton.Importance = widget.MediumImportance
 	restartButton.SetToolTip(fmt.Sprintf(locale.T("core.button_restart_tooltip"), platform.ShortcutModifierLabel()))
-	tab.startButton = startButton
+	tab.startButton = powerBtn
 	tab.stopButton = stopButton
 	tab.restartButton = restartButton
 	// Restart-кнопка теперь — split-control: тап показывает popup-menu с
@@ -321,20 +325,45 @@ func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 		pop.ShowAtPosition(fyne.NewPos(pos.X, pos.Y+restartButton.Size().Height))
 	}
 
-	statusContainer := container.NewHBox(
-		tab.statusLabel,
-	)
+	// "VPN" title above the power card
+	vpnTitle := widget.NewLabelWithStyle("VPN", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 
-	buttonsContainer := container.NewCenter(
-		container.NewHBox(startButton, restartButton, stopButton),
+	// Inner card — two rows inside a white-outlined square:
+	//   Row 1: status label
+	//   Row 2: [OFF] [R]  or  [ON] [R]
+	innerRow := container.NewHBox(
+		container.NewPadded(powerBtn),
+		container.NewPadded(restartButton),
+		container.NewPadded(stopButton),
 	)
+	// White outline card with rounded corners.
+	// Uses a Border layout with a padded inner area.
+	// The white outline is achieved via the container padding around the inner box.
+	titleBox := container.NewCenter(vpnTitle)
 
-	// Return container with status and buttons, with empty lines before and after buttons
+	// Stack two rectangles: white outer (border) + black inner, then content on top.
+	whiteBg := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	whiteBg.CornerRadius = 14
+	whiteBg.SetMinSize(fyne.NewSize(180, 200))
+
+	blackBg := canvas.NewRectangle(color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff})
+	blackBg.CornerRadius = 10
+	blackBg.SetMinSize(fyne.NewSize(172, 192))
+
+	contentBox := container.NewVBox(
+		container.NewPadded(titleBox),
+		container.NewPadded(container.NewCenter(tab.statusLabel)),
+		container.NewCenter(innerRow),
+	)
+	contentPadded := container.NewPadded(contentBox)
+
+	card := container.NewStack(whiteBg, blackBg, contentPadded)
+	buttonsContainer := container.NewCenter(card)
+
 	return container.NewVBox(
-		statusContainer,
-		widget.NewLabel(""), // Empty line before buttons
+		widget.NewLabel(""), // top margin
 		buttonsContainer,
-		widget.NewLabel(""), // Empty line after buttons
+		widget.NewLabel(""), // bottom margin
 	)
 }
 

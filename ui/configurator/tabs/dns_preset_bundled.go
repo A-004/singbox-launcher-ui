@@ -195,10 +195,10 @@ func showTemplateDNSDetailsDialog(parent fyne.Window, body map[string]interface{
 		return
 	}
 	tag, _ := body["tag"].(string)
-	icon := "🔒"
+	icon := "<>"
 	helpText := "Read-only template DNS server. Toggle on/off via checkbox."
 	if required {
-		icon = "⛔"
+		icon = "!!"
 		helpText = "Required template DNS server: always enabled, always emitted."
 	}
 	header := widget.NewLabelWithStyle(

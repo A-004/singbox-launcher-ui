@@ -354,7 +354,7 @@ func CreateClashAPITab(ac *core.AppController) fyne.CanvasObject {
 		nameLabel.TextStyle.Bold = true
 
 		pingButton := ttwidget.NewButton(locale.T("servers.button_ping"), nil)
-		switchButton := widget.NewButton("▶️", nil)
+		switchButton := widget.NewButton("[>]", nil)
 
 		rowGutter := canvas.NewRectangle(color.Transparent)
 		rowGutter.SetMinSize(fyne.NewSize(serversListRowScrollbarGutterWidth, 0))
@@ -999,7 +999,7 @@ func CreateClashAPITab(ac *core.AppController) fyne.CanvasObject {
 	}
 
 	// Настройки Ping test (endpoint для delay).
-	pingSettingsButton := ttwidget.NewButton("⚙", func() {
+	pingSettingsButton := ttwidget.NewButton("[*]", func() {
 		currentURL := api.GetPingTestURL()
 
 		// Predefined endpoints with titles from api package.
@@ -1115,7 +1115,7 @@ func CreateClashAPITab(ac *core.AppController) fyne.CanvasObject {
 	)
 
 	// Mapping button for showing selector -> currently active outbound (queried from Clash API)
-	mapButton := widget.NewButton("⇄", func() {
+	mapButton := widget.NewButton("<->", func() {
 		if ac.APIService == nil {
 			ShowErrorText(ac.UIService.MainWindow, "Clash API", locale.T("servers.error_api_not_initialized"))
 			return
@@ -1222,7 +1222,7 @@ func CreateClashAPITab(ac *core.AppController) fyne.CanvasObject {
 	// SPEC 064: status badge ("🏠 Local" / "🌐 host:port") + gear ⚙ для
 	// remote-endpoint settings. Badge auto-update'ится через OnOverrideChanged.
 	endpointBadge := newRemoteEndpointBadge()
-	endpointGearBtn := ttwidget.NewButton("⚙", func() {
+	endpointGearBtn := ttwidget.NewButton("[*]", func() {
 		showRemoteEndpointDialog(ac, ac.UIService.MainWindow, func() {
 			// onChanged: после Set/Clear override force-refresh proxy list,
 			// чтобы tab сразу отразил данные нового endpoint'а.

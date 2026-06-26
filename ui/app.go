@@ -1,7 +1,10 @@
 package ui
 
 import (
+	"image/color"
+
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
@@ -12,23 +15,29 @@ import (
 	"singbox-launcher/ui/components"
 )
 
+// tabDef describes one tab in the custom tab bar.
+type tabDef struct {
+	Label   string
+	Content fyne.CanvasObject
+}
+
 // App manages the UI structure and tabs.
 //
-// `overlay` and `content` exist for the optional main-window click-redirect
-// overlay (see `ui/wizard_overlay.go::wizardOverlayEnabled`). When the
-// feature flag is off, `content == tabs` (bare passthrough) and `overlay`
-// stays nil — clicks on the main window flow normally even while the
-// configurator is open.
+// Uses custom tab buttons with square outline on the active tab instead
+// of Fyne's default AppTabs (which have a thick underline indicator).
 type App struct {
-	window      fyne.Window
-	core        *core.AppController
-	tabs        *container.AppTabs
-	clashAPITab *container.TabItem
-	currentTab  *container.TabItem
-	content     fyne.CanvasObject
-	// overlay is a concrete ClickRedirect component from `ui/components`.
-	// nil when `wizardOverlayEnabled` is false (current default).
+	window  fyne.Window
+	core    *core.AppController
+	content fyne.CanvasObject
 	overlay *components.ClickRedirect
+
+	tabs          []tabDef
+	activeTab     int
+	tabBtns       []*widget.Button
+	tabContentBox *fyne.Container
+
+	// Clash API tab index (for updateClashAPITabState)
+	clashAPIIndex int
 }
 
 // NewApp creates a new App instance
@@ -38,154 +47,139 @@ func NewApp(window fyne.Window, controller *core.AppController) *App {
 		core:   controller,
 	}
 
-	// Create tabs - Core is first (opens on startup)
-	// Создаем вкладку Core первой, чтобы её callback установился.
-	// Emoji-in-label (💡 default emoji presentation) — colour rendering
-	// via OS font fallback to Apple Color Emoji, matching sibling tabs
-	// (🖥️ Servers / ⚙️ Settings / 🔍 Diagnostics).
-	coreTabItem := container.NewTabItem(locale.T("app.tab.core"), CreateCoreDashboardTab(controller))
-	app.clashAPITab = container.NewTabItem(locale.T("app.tab.servers"), CreateClashAPITab(controller))
-	// Settings tab is a no-content placeholder that acts as a button: its
-	// OnSelected handler opens the standalone Settings window (see
-	// ui/settings_window.go) and then immediately reverts tab selection
-	// back to the previously active tab. Keeps the entry point visible in
-	// the tab strip without giving Settings a full-sized tab page.
-	// Content widget is a 1-line label only to satisfy Fyne's tab-must-have-
-	// content invariant; it's never actually rendered because we revert
-	// selection before the tab content is drawn.
-	settingsTabItem := container.NewTabItem(locale.T("app.tab.settings"), widget.NewLabel(""))
-	// Tab order: Core | Servers | 🔍 Diagnostics | ⚙️ Settings | ❓ Help.
-	// Settings sits between Diagnostics and Help — close to other
-	// "launcher behavior" controls and one click away from Help.
-	app.tabs = container.NewAppTabs(
-		coreTabItem,
-		app.clashAPITab,
-		container.NewTabItem(locale.T("app.tab.diagnostics"), CreateDiagnosticsTab(controller)),
-		settingsTabItem,
-		container.NewTabItem(locale.T("app.tab.help"), CreateHelpTab(controller)),
-	)
+	// Build tab definitions
+	coreLabel := stripLeadingEmoji(locale.T("app.tab.core"))
+	serversLabel := locale.T("app.tab.servers")
+	diagLabel := locale.T("app.tab.diagnostics")
+	settingsLabel := locale.T("app.tab.settings")
+	helpLabel := locale.T("app.tab.help")
 
-	// Set tab selection handler
-	app.tabs.OnSelected = func(item *container.TabItem) {
-		// Settings tab acts as a button: open the window, revert to the
-		// previous tab. The revert triggers OnSelected again with the
-		// previous TabItem — guarded by the `item == settingsTabItem`
-		// check so we don't infinite-loop.
-		if item == settingsTabItem {
-			OpenSettingsWindow(controller)
-			// Fallback to Core if user clicked Settings as their very
-			// first action (app.currentTab still nil).
-			target := app.currentTab
-			if target == nil || target == settingsTabItem {
-				target = coreTabItem
+	app.tabs = []tabDef{
+		{Label: coreLabel, Content: CreateCoreDashboardTab(controller)},
+		{Label: serversLabel, Content: CreateClashAPITab(controller)},
+		{Label: diagLabel, Content: CreateDiagnosticsTab(controller)},
+		{Label: settingsLabel, Content: widget.NewLabel("")},
+		{Label: helpLabel, Content: CreateHelpTab(controller)},
+	}
+	app.clashAPIIndex = 1
+
+	// Settings opens a separate window via callback, not inline content.
+	// Store a no-op content; the on-tap handler does the window open.
+
+	// Build tab buttons
+	app.tabBtns = make([]*widget.Button, len(app.tabs))
+	for i, td := range app.tabs {
+		idx := i
+		btn := widget.NewButton(td.Label, func() {
+			if idx == 3 { // Settings tab index
+				OpenSettingsWindow(controller)
+				return
 			}
-			app.tabs.Select(target)
-			return
-		}
-		app.currentTab = item
-		if item == app.clashAPITab {
-			// SPEC 064: Servers tab is always reachable so the user can
-			// configure a remote Clash API endpoint even when local
-			// sing-box isn't running. The tab's own UI (badge + disabled
-			// controls) communicates the "no API available" state — no
-			// need to bounce the user back to Core. RefreshAPIFunc is
-			// safe to call: it no-ops when neither local sing-box nor a
-			// remote override is reachable.
-			if controller.UIService != nil && controller.UIService.RefreshAPIFunc != nil {
-				controller.UIService.RefreshAPIFunc()
+			app.selectTab(idx)
+			if idx == app.clashAPIIndex {
+				if controller.UIService != nil && controller.UIService.RefreshAPIFunc != nil {
+					controller.UIService.RefreshAPIFunc()
+				}
 			}
-		}
+		})
+		btn.Importance = widget.LowImportance
+		app.tabBtns[i] = btn
 	}
 
-	// Сохраняем оригинальный callback, который был установлен в CreateCoreDashboardTab
-	originalUpdateCoreStatusFunc := controller.UIService.UpdateCoreStatusFunc
+	// Tab content: start with the first tab's content visible
+	app.activeTab = 0
+	app.tabContentBox = container.NewStack(app.tabs[0].Content)
 
-	// refreshCoreTabIcon — динамический emoji в табе Core по состоянию
-	// sing-box. Перерисовывает label + дёргает AppTabs.Refresh чтобы
-	// табстрип реально перечитал текст. Безопасно вызывать с UI-thread
-	// (caller wrap'ит в fyne.Do).
-	//
-	// Status-indicator paradigm (как у media-плеера):
-	//   ⏸️ Core  — stopped / idle (sing-box не запущен)
-	//   ▶️ Core  — running (sing-box активен)
-	//
-	// База берётся из локали (`Core` / `Ядро` / etc), эмодзи приклеивается
-	// тут чтобы не плодить per-state ключи в каждой локали.
-	coreLabelBase := locale.T("app.tab.core")
-	// Strip leading emoji + space from the locale base — text after the
-	// first space character. Locale strings ship with a default ▶️ (or
-	// previous attempt's icon) for the never-changed startup case; we
-	// override per-state below so the leading emoji from locale gets
-	// stripped to avoid double-icon.
-	if i := indexEmojiSep(coreLabelBase); i > 0 {
-		coreLabelBase = coreLabelBase[i:]
+	// Apply active styling
+	app.updateTabStyles()
+
+	// Build the tab bar with thin separators between buttons
+	tabBarItems := make([]fyne.CanvasObject, 0, len(app.tabBtns)*2-1)
+	for i, btn := range app.tabBtns {
+		if i > 0 {
+			// Thin vertical line separator between tabs
+			sep := canvas.NewRectangle(color.NRGBA{R: 0x38, G: 0x38, B: 0x3a, A: 0xff})
+			sep.SetMinSize(fyne.NewSize(1, 20))
+			tabBarItems = append(tabBarItems, sep)
+		}
+		tabBarItems = append(tabBarItems, btn)
 	}
+	tabBar := container.NewHBox(tabBarItems...)
+
+	// Wrap tab bar in a centered row
+	tabBarCenter := container.NewCenter(tabBar)
+
+	// Main layout: tab bar on top, content below
+	mainContent := container.NewBorder(tabBarCenter, nil, nil, nil, app.tabContentBox)
+	app.content = mainContent
+
+	// Core tab status refresh
 	refreshCoreTabIcon := func() {
 		var icon string
-		switch {
-		case controller.RunningState != nil && controller.RunningState.IsRunning():
-			icon = "▶️"
-		default:
-			icon = "⏸️"
+		if controller.RunningState != nil && controller.RunningState.IsRunning() {
+			icon = ">"
+		} else {
+			icon = "||"
 		}
-		coreTabItem.Text = icon + " " + coreLabelBase
-		app.tabs.Refresh()
+		app.tabBtns[0].SetText(icon + " " + coreLabel)
 	}
+	refreshCoreTabIcon()
 
-	// Регистрируем комбинированный callback для обновления состояния вкладки Servers
-	// (legacy путь UpdateCoreStatusFunc — сохраняем пока на нём висят
-	// другие потребители: core_dashboard_tab.updateRunningStatus, etc.)
+	// Wire up event callbacks
+	originalUpdateCoreStatusFunc := controller.UIService.UpdateCoreStatusFunc
 	controller.UIService.UpdateCoreStatusFunc = func() {
-		// Вызываем оригинальный callback, если он есть
 		if originalUpdateCoreStatusFunc != nil {
 			originalUpdateCoreStatusFunc()
 		}
-		// Обновляем состояние вкладки Servers
 		fyne.Do(func() {
 			app.updateClashAPITabState()
 		})
 	}
 
-	// Динамическая иконка Core подписывается на ТИПИЗИРОВАННЫЙ
-	// EventBus (SPEC 047), а не на legacy UpdateCoreStatusFunc — это
-	// канонический канал для cross-tab реакций на смену состояния
-	// sing-box. Тот же канал слушает auto_update / proxy-active-changed
-	// логика. Subscribe идемпотентен (одна handler-регистрация на NewApp).
 	if controller.EventBus != nil {
 		controller.EventBus.Subscribe(events.VpnStateChanged, func(_ events.Event) {
 			fyne.Do(refreshCoreTabIcon)
 		})
 	}
 
-	// SPEC 064: подписка на remote-override changes. Set/Clear из
-	// gear-dialog'а в Servers tab → tab немедленно re-enable / re-disable.
-	// Listener тонкий: только trigger UI refresh через fyne.Do.
 	OnOverrideChanged(func() {
 		fyne.Do(app.updateClashAPITabState)
 	})
 
-	// Инициализируем состояние вкладки + первичный рендер иконки Core.
-	// EventBus.Subscribe не fires backfill — рендерим вручную для startup'а.
 	app.updateClashAPITabState()
 	refreshCoreTabIcon()
 
-	// Инициализируем overlay для перенаправления кликов на визард.
-	// Поведение зависит от `wizardOverlayEnabled` (см. ui/wizard_overlay.go) —
-	// по дефолту выключено, главное окно работает параллельно с визардом.
 	InitWizardOverlay(app, controller)
 
-	// Main-window keyboard shortcuts for power users — matches the
-	// right-click menu on the Update button (core_dashboard_tab.go).
-	// Modifier is ShortcutDefault which maps to Super on macOS, Control on
-	// Linux/Windows. Registered on the Canvas so they fire regardless of
-	// which tab has focus, unless a text field is actively consuming input.
 	app.registerShortcuts()
 
 	return app
 }
 
-// registerShortcuts wires keyboard accelerators for the most common daily
-// power-user actions: reconnect sing-box, update subscriptions.
+// selectTab switches to the given tab index and updates button styles.
+func (a *App) selectTab(idx int) {
+	if idx < 0 || idx >= len(a.tabs) || idx == a.activeTab {
+		return
+	}
+	// Replace content in stack
+	a.tabContentBox.Objects = []fyne.CanvasObject{a.tabs[idx].Content}
+	a.tabContentBox.Refresh()
+	a.activeTab = idx
+	a.updateTabStyles()
+}
+
+// updateTabStyles applies square outline to the active tab button.
+func (a *App) updateTabStyles() {
+	for i, btn := range a.tabBtns {
+		if i == a.activeTab {
+			btn.Importance = widget.HighImportance
+		} else {
+			btn.Importance = widget.LowImportance
+		}
+		btn.Refresh()
+	}
+}
+
 func (a *App) registerShortcuts() {
 	if a.window == nil || a.window.Canvas() == nil {
 		return
@@ -198,9 +192,6 @@ func (a *App) registerShortcuts() {
 	a.window.Canvas().AddShortcut(updateSubs, func(fyne.Shortcut) {
 		core.RunParserProcess()
 	})
-	// Cmd/Ctrl+P → ping-all. Bound to the same hook the power-resume path
-	// uses (AutoPingAfterConnectFunc), so it works even when the Servers tab
-	// isn't focused.
 	pingAll := &desktop.CustomShortcut{KeyName: fyne.KeyP, Modifier: fyne.KeyModifierShortcutDefault}
 	a.window.Canvas().AddShortcut(pingAll, func(fyne.Shortcut) {
 		if a.core != nil && a.core.UIService != nil && a.core.UIService.AutoPingAfterConnectFunc != nil {
@@ -209,51 +200,22 @@ func (a *App) registerShortcuts() {
 	})
 }
 
-// GetContent returns the root content for the main window (tabs alone when
-// the overlay is disabled, tabs+overlay when enabled — see
-// `wizardOverlayEnabled`).
+// GetContent returns the root content for the main window.
 func (a *App) GetContent() fyne.CanvasObject {
-	if a.content != nil {
-		return a.content
-	}
-	return a.tabs
+	return a.content
 }
 
-// updateClashAPITabState — SPEC 064 update: tab **всегда** доступна.
-//
-// Раньше (до SPEC 064) tab disable'илась когда локальный sing-box не запущен.
-// Это создало chicken-and-egg: gear-кнопка для настройки remote-endpoint
-// живёт ВНУТРИ этой вкладки, юзер не мог до неё добраться из cold-start
-// состояния (local не стартован, override ещё не задан → tab disabled →
-// gear недоступен → override никогда не задать).
-//
-// Решение: вкладка постоянно enabled. Если ни local sing-box, ни remote
-// override не активны — refresh-логика покажет «Clash API offline» в
-// ApiStatusLabel, но badge + gear остаются нажимаемыми, и юзер может
-// настроить remote или запустить local.
-//
-// Функция оставлена в качестве no-op-stub: вызывается из множества мест
-// в кодовой базе (UpdateCoreStatusFunc, EventBus subscriber, OnOverrideChanged
-// listener). Удалять hook не имеет смысла — нет cost'а, и позволяет в
-// будущем вернуть гейтинг если потребуется.
+// updateClashAPITabState — SPEC 064: Servers tab always enabled.
 func (a *App) updateClashAPITabState() {
-	if a.clashAPITab == nil || a.tabs == nil {
-		return
-	}
-	// SPEC 064: всегда enabled. Никаких DisableItem'ов больше нет.
-	a.tabs.EnableItem(a.clashAPITab)
+	// All tabs are always enabled in our custom bar — no-op.
 }
 
-// indexEmojiSep — returns the byte index just AFTER the first ASCII
-// space following an emoji prefix in s ("🚀 Core" → 5, "Core" → 0).
-// Used to strip a baked-in emoji from the locale's app.tab.core string
-// so we can substitute a state-driven one at runtime without each
-// locale carrying separate `app.tab.core.running` keys.
-func indexEmojiSep(s string) int {
+// stripLeadingEmoji removes any leading emoji + space from a label.
+func stripLeadingEmoji(s string) string {
 	for i, r := range s {
 		if r == ' ' {
-			return i + 1 // byte index after the space
+			return s[i+1:]
 		}
 	}
-	return 0
+	return s
 }

@@ -131,13 +131,14 @@ func (m *Manager) build() {
 		go func() { fyne.Do(func() { m.refreshTitle() }) }()
 	})
 
-	tabs := container.NewAppTabs(
-		container.NewTabItem("Live", live.Content),
-		container.NewTabItem("Per-process", perProcess.Content),
+	tabBar, tabStack, _ := customTabstrip(
+		[]string{"Live", "Per-process"},
+		[]fyne.CanvasObject{live.Content, perProcess.Content},
+		nil,
 	)
 
 	toolbar := buildWindowToolbar(deps, win)
-	root := container.NewBorder(toolbar, nil, nil, nil, tabs)
+	root := container.NewBorder(toolbar, nil, nil, nil, container.NewBorder(tabBar, nil, nil, nil, tabStack))
 
 	// Wrap with tooltip layer so ttwidget tooltips work inside the window
 	// (otherwise fyne-tooltip warns "no tool tip layer for current
