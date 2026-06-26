@@ -1,0 +1,8 @@
+{
+  "Primary": "#ff6600",
+  "Background": "#0a0a0f",
+  "Foreground": "#ffffff",
+  "Success": "#00ff88",
+  "Error": "#ff3333",
+  "Button": "#1a1a24"
+}
