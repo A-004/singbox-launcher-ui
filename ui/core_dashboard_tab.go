@@ -74,15 +74,19 @@ type CoreDashboardTab struct {
 	wintunDownloadInProgress bool // Flag for wintun.dll download process
 }
 
-// outlinedCard wraps any content in a white-outlined rounded rectangle card.
-// No fixed min sizes — content dimensions determine the card size freely.
-func outlinedCard(content fyne.CanvasObject) fyne.CanvasObject {
-	whiteBg := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
-	whiteBg.CornerRadius = 16
-	blackBg := canvas.NewRectangle(color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff})
-	blackBg.CornerRadius = 12
-	wrapped := container.NewPadded(content)
-	return container.NewStack(whiteBg, blackBg, wrapped)
+// outlinedBorder wraps content in a 1px white rectangle outline.
+func outlinedBorder(content fyne.CanvasObject) fyne.CanvasObject {
+	bg := canvas.NewRectangle(color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff})
+	inner := container.NewStack(bg, container.NewPadded(content))
+	top := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	top.SetMinSize(fyne.NewSize(0, 1))
+	bottom := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	bottom.SetMinSize(fyne.NewSize(0, 1))
+	left := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	left.SetMinSize(fyne.NewSize(1, 0))
+	right := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	right.SetMinSize(fyne.NewSize(1, 0))
+	return container.NewBorder(top, bottom, left, right, inner)
 }
 
 // CreateCoreDashboardTab creates and returns the Core Dashboard tab
@@ -109,13 +113,13 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 		coreRows = append(coreRows, wintunBlock)
 	}
 	coreRows = append(coreRows, configBlock)
-	coreInfo := outlinedCard(container.NewVBox(coreRows...))
+	coreInfo := outlinedBorder(container.NewVBox(coreRows...))
 
 	// Group 4: State + Exit in one card
 	stateBlock := tab.createStateBlock()
 	exitButton := widget.NewButton(locale.T("core.button_exit"), ac.GracefulExit)
 	exitRow := container.NewCenter(exitButton)
-	stateCard := outlinedCard(container.NewVBox(
+	stateCard := outlinedBorder(container.NewVBox(
 		stateBlock,
 		widget.NewLabel(""),
 		exitRow,
@@ -346,20 +350,13 @@ func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 		container.NewPadded(container.NewCenter(restartButton)),
 	))
 
-	// Card frame — no fixed min sizes, content drives the card dimensions.
-	whiteOutline := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
-	whiteOutline.CornerRadius = 16
-
-	cardInner := canvas.NewRectangle(color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff})
-	cardInner.CornerRadius = 12
-
-	cardContent := container.NewPadded(container.NewVBox(
+	// VPN card: white outlined border + black background
+	vpnContent := container.NewPadded(container.NewVBox(
 		container.NewPadded(container.NewCenter(vpnTitle)),
 		container.NewPadded(container.NewCenter(tab.statusLabel)),
 		btnRow,
 	))
-
-	card := container.NewStack(whiteOutline, cardInner, cardContent)
+	card := outlinedBorder(vpnContent)
 	centered := container.NewCenter(card)
 
 	rows := []fyne.CanvasObject{centered}
