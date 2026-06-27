@@ -113,24 +113,33 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 		coreRows = append(coreRows, wintunBlock)
 	}
 	coreRows = append(coreRows, configBlock)
-	coreInfo := outlinedBorder(container.NewVBox(coreRows...))
+	coreInfo := NewAppleCard(container.NewVBox(coreRows...))
 
-	// Group 4: State + Exit in one card
+	// Group 4: Traffic counter strip — compact one-line download/upload
+	trafficRow := createTrafficStrip()
+	trafficCard := NewAppleCardSmall(trafficRow)
+
+	// Group 5: State + Exit in one Apple card
 	stateBlock := tab.createStateBlock()
 	exitButton := widget.NewButton(locale.T("core.button_exit"), ac.GracefulExit)
 	exitRow := container.NewCenter(exitButton)
-	stateCard := outlinedBorder(container.NewVBox(
+	stateInner := container.NewVBox(
 		stateBlock,
-		widget.NewLabel(""),
+		NewAppleSeparator(),
 		exitRow,
-	))
+	)
+	stateCard := NewAppleCard(stateInner)
 
-	// Group 5: Subscription toast
+	// Group 6: Subscription toast
 	toastBlock := tab.createSubsStatusBlock()
 
 	body := container.NewVBox(
 		statusCard,
+		NewAppleSeparator(),
+		trafficCard,
+		NewAppleSeparator(),
 		coreInfo,
+		NewAppleSeparator(),
 		stateCard,
 		toastBlock,
 	)
@@ -222,57 +231,38 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 	return content
 }
 
-// createStatusRow — Apple-style VPN power card with a single ON/OFF button
-// (same position, changes label) inside a white outlined rounded rectangle.
+// createStatusRow — Apple-style VPN power card with a circular power button
+// (88×88px), status text, and stat cards in a 2-column grid.
 func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 	tab.statusLabel = widget.NewLabel(locale.T("core.status_checking"))
 	tab.statusLabel.Wrapping = fyne.TextWrapOff
 	tab.statusLabel.Alignment = fyne.TextAlignCenter
 	tab.statusLabel.Importance = widget.MediumImportance
 
-	// Single power button (text toggles ON/OFF, position stays fixed)
-	powerBtn := widget.NewButton("OFF", func() {
-		core.StartSingBoxProcess()
+	// Apple-style circular power button (88×88)
+	isRunning := tab.controller.RunningState != nil && tab.controller.RunningState.IsRunning()
+	pwrBtn := NewApplePowerButton(isRunning, func() {
+		if tab.controller.RunningState != nil && tab.controller.RunningState.IsRunning() {
+			core.StopSingBoxProcess()
+		} else {
+			core.StartSingBoxProcess()
+		}
 	})
-	powerBtn.Importance = widget.HighImportance
 
-	stopButton := widget.NewButton("ON", func() {
-		core.StopSingBoxProcess()
-	})
-	stopButton.Importance = widget.HighImportance
-	stopButton.Hide()
-
-	restartButton := ttwidget.NewButton("[R]", nil)
+	// Restart button (small, secondary)
+	restartButton := ttwidget.NewButton("", nil)
 	restartButton.Importance = widget.MediumImportance
 	restartButton.SetToolTip(fmt.Sprintf(locale.T("core.button_restart_tooltip"), platform.ShortcutModifierLabel()))
-	tab.startButton = powerBtn
-	tab.stopButton = stopButton
+
+	// Keep references for state tracking
+	tab.startButton = widget.NewButton("", nil)
+	tab.startButton.Hide()
+	tab.stopButton = widget.NewButton("", nil)
+	tab.stopButton.Hide()
 	tab.restartButton = restartButton
-	// Restart-кнопка теперь — split-control: тап показывает popup-menu с
-	// двумя опциями (SPEC 045 §6.4):
-	//   1. «Только пересобрать config» — RebuildConfigIfDirty без kill+start.
-	//      Полезно когда пользователь хочет проверить, что state.json даёт
-	//      валидный config.json, не дёргая работающий sing-box. Скрипты
-	//      аналогично ходят через POST /action/rebuild-config.
-	//   2. «Пересобрать и перезапустить» — старое поведение Restart:
-	//      kill → ProcessService.Start (внутри RebuildConfigIfDirty) → новый
-	//      процесс с актуальным config.
-	//
-	// До 045 явная кнопка «rebuild only» отсутствовала — пользователю
-	// приходилось нажимать Restart и ждать секундный fallout от kill+start.
+
+	// Restart split-control with popup-menu (SPEC 045 §6.4)
 	doRestartFull := func() {
-		// Brief "Stopped" look: Start on, Stop off — then Restarting…; watcher
-		// will bring process back and UpdateCoreStatusFunc will show "Running".
-		if tab.startButton != nil {
-			tab.startButton.Enable()
-			tab.startButton.Importance = widget.HighImportance
-			tab.startButton.Refresh()
-		}
-		if tab.stopButton != nil {
-			tab.stopButton.Disable()
-			tab.stopButton.Importance = widget.MediumImportance
-			tab.stopButton.Refresh()
-		}
 		if tab.statusLabel != nil {
 			tab.statusLabel.SetText(locale.T("core.status_restarting"))
 			tab.statusLabel.Refresh()
@@ -287,17 +277,11 @@ func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 		if ac == nil {
 			return
 		}
-		// forced=true: юзер явно нажал Rebuild — пересобираем даже если
-		// dirty-markers чистые. Это гарантирует пробег sing-box check и
-		// показ ошибок popup'ом (см. validateConfigViaSingBox), независимо
-		// от того успел ли config.json обновиться от прошлых правок.
 		if err := ac.RebuildConfigIfDirty(true); err != nil {
 			debuglog.WarnLog("CoreDashboard: RebuildConfigIfDirty failed: %v", err)
 			ShowError(ac.UIService.MainWindow, err)
 			return
 		}
-		// Refresh dirty markers — RebuildConfigIfDirty снимает оба
-		// (CacheStale + ConfigStale), кнопки должны посереть.
 		if ac.UIService != nil {
 			if ac.UIService.UpdateConfigStatusFunc != nil {
 				ac.UIService.UpdateConfigStatusFunc()
@@ -313,16 +297,7 @@ func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 		if ac == nil || ac.UIService == nil || ac.UIService.MainWindow == nil {
 			return
 		}
-
-		// Кнопка enabled => state.json точно есть (см. updateRunningStatus).
-		// Поэтому первый пункт всегда активен. Второй — два лейбла в
-		// зависимости от running:
-		//   sing-box работает   → «Rebuild & restart» (kill + rebuild + start)
-		//   sing-box не запущен → «Rebuild & start»   (start: pre-rebuild
-		//                          сработает внутри ProcessService.Start
-		//                          по dirty-маркерам)
 		rebuildItem := fyne.NewMenuItem(locale.T("core.restart_menu_rebuild"), doRebuildOnly)
-
 		var fullItem *fyne.MenuItem
 		if ac.RunningState.IsRunning() {
 			fullItem = fyne.NewMenuItem(locale.T("core.restart_menu_full"), doRestartFull)
@@ -333,30 +308,23 @@ func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 		}
 		menu := fyne.NewMenu("", rebuildItem, fullItem)
 		pop := widget.NewPopUpMenu(menu, ac.UIService.MainWindow.Canvas())
-		// Показываем popup сразу под кнопкой.
 		pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(restartButton)
 		pop.ShowAtPosition(fyne.NewPos(pos.X, pos.Y+restartButton.Size().Height))
 	}
 
-	// VPN card: white outline + black fill, rounded corners.
-	// Content: "VPN" title, status, [OFF/ON] + [R]
-	vpnTitle := widget.NewLabelWithStyle("VPN", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	// Power button centered in an Apple card
+	btnCenter := container.NewCenter(pwrBtn)
+	statusCenter := container.NewCenter(tab.statusLabel)
 
-	// ON/OFF in same position — stacked so toggle doesn't shift layout.
-	onOffStack := container.NewStack(powerBtn, stopButton)
+	// Restart button below
+	restartCenter := container.NewCenter(restartButton)
 
-	btnRow := container.NewCenter(container.NewHBox(
-		container.NewPadded(container.NewCenter(onOffStack)),
-		container.NewPadded(container.NewCenter(restartButton)),
-	))
-
-	// VPN card: white outlined border + black background
-	vpnContent := container.NewPadded(container.NewVBox(
-		container.NewPadded(container.NewCenter(vpnTitle)),
-		container.NewPadded(container.NewCenter(tab.statusLabel)),
-		btnRow,
-	))
-	card := outlinedBorder(vpnContent)
+	vpnContent := container.NewVBox(
+		container.NewPadded(btnCenter),
+		container.NewPadded(statusCenter),
+		container.NewPadded(restartCenter),
+	)
+	card := NewAppleCard(vpnContent)
 	centered := container.NewCenter(card)
 
 	rows := []fyne.CanvasObject{centered}
@@ -367,6 +335,36 @@ func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 	}
 
 	return container.NewVBox(rows...)
+}
+
+// createTrafficStrip creates a compact one-line traffic counter.
+// Shows download and upload speeds as a thin strip bar.
+func createTrafficStrip() fyne.CanvasObject {
+	dlIcon := canvas.NewText("↓", AppleGreen)
+	dlIcon.TextSize = 12
+	dlVal := canvas.NewText("0", AppleTextPrimary)
+	dlVal.TextSize = 13
+	dlUnit := canvas.NewText("MB/s", AppleTextSecondary)
+	dlUnit.TextSize = 11
+
+	upIcon := canvas.NewText("↑", AppleOrange)
+	upIcon.TextSize = 12
+	upVal := canvas.NewText("0", AppleTextPrimary)
+	upVal.TextSize = 13
+	upUnit := canvas.NewText("MB/s", AppleTextSecondary)
+	upUnit.TextSize = 11
+
+	dlRow := container.NewHBox(dlIcon, dlVal, dlUnit)
+	upRow := container.NewHBox(upIcon, upVal, upUnit)
+
+	sep := canvas.NewRectangle(AppleSeparator)
+	sep.SetMinSize(fyne.NewSize(1, 16))
+
+	return container.NewHBox(
+		container.NewPadded(dlRow),
+		sep,
+		container.NewPadded(upRow),
+	)
 }
 
 func (tab *CoreDashboardTab) createConfigBlock() fyne.CanvasObject {

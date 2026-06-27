@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"image/color"
-
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -93,31 +91,40 @@ func NewApp(window fyne.Window, controller *core.AppController) *App {
 	// Apply active styling
 	app.updateTabStyles()
 
-	// Build the tab bar with thin separators between buttons
-	tabBarItems := make([]fyne.CanvasObject, 0, len(app.tabBtns)*2-1)
-	for i, btn := range app.tabBtns {
-		if i > 0 {
-			// Thin vertical line separator between tabs
-			sep := canvas.NewRectangle(color.NRGBA{R: 0x38, G: 0x38, B: 0x3a, A: 0xff})
-			sep.SetMinSize(fyne.NewSize(1, 20))
-			tabBarItems = append(tabBarItems, sep)
-		}
+	// Build bottom navigation bar (tab buttons)
+	tabBarItems := make([]fyne.CanvasObject, 0, len(app.tabBtns))
+	for _, btn := range app.tabBtns {
 		tabBarItems = append(tabBarItems, btn)
 	}
-	tabBar := container.NewCenter(container.NewHBox(tabBarItems...))
 
-	// Wrap tab bar in a white-outlined rounded card
-	whiteBg := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
-	whiteBg.CornerRadius = 16
-	blackBg := canvas.NewRectangle(color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff})
-	blackBg.CornerRadius = 12
+	// Bottom navigation — Apple dark style (49px height)
+	bottomBg := canvas.NewRectangle(AppleBottomBg)
+	bottomBg.SetMinSize(fyne.NewSize(0, 49))
 
-	wrappedTabBar := container.NewPadded(tabBar)
-	tabCard := container.NewStack(whiteBg, blackBg, wrappedTabBar)
+	bottomSep := canvas.NewRectangle(AppleSeparator)
+	bottomSep.SetMinSize(fyne.NewSize(0, 0.5))
 
-	// Main layout: tab bar card on top, content below
-	mainContent := container.NewBorder(tabCard, nil, nil, nil, app.tabContentBox)
-	app.content = mainContent
+	bottomBar := container.NewVBox(
+		bottomSep,
+		container.NewCenter(container.NewHBox(tabBarItems...)),
+	)
+	bottomWrap := container.NewStack(bottomBg, bottomBar)
+
+	// Apple-style titlebar at top
+	titlebar := AppleTitlebar("xerotrace (singbox-launcher)", 40)
+
+	// Main layout: titlebar top, bottom nav, content in center
+	mainContent := container.NewBorder(
+		titlebar,  // top
+		bottomWrap, // bottom
+		nil, nil,
+		app.tabContentBox, // center (fills remaining space)
+	)
+
+	// Set window background
+	bg := canvas.NewRectangle(AppleWindowBg)
+
+	app.content = container.NewStack(bg, mainContent)
 
 	// Core tab status refresh
 	refreshCoreTabIcon := func() {
