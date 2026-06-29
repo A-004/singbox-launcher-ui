@@ -32,6 +32,15 @@ func GetConfigPath(execDir string) string {
 	return filepath.Join(execDir, constants.BinDirName, constants.ConfigFileName)
 }
 
+// GetExecutableExt returns the executable extension for the current platform.
+// ".exe" on Windows, "" on Unix.
+func GetExecutableExt() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
+
 // GetBinDir returns the path to bin directory
 func GetBinDir(execDir string) string {
 	return filepath.Join(execDir, constants.BinDirName)

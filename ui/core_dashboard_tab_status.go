@@ -281,6 +281,18 @@ func (tab *CoreDashboardTab) updateVersionInfo() error {
 				// Версия совпадает — кнопка скрыта.
 				tab.setSingboxState(installedVersion, "", -1)
 			}
+			// Проверить наличие новой версии core (покажет ⬆ если есть)
+			tab.checkAndShowUpdateButton()
+			// Показать/скрыть ☰ если есть архивные версии
+			if tab.versionListBtn != nil {
+				archived := tab.controller.GetArchivedCoreVersions()
+				if len(archived) > 0 {
+					tab.versionListBtn.Show()
+					tab.versionListBtn.Refresh()
+				} else {
+					tab.versionListBtn.Hide()
+				}
+			}
 		})
 	}()
 	return nil

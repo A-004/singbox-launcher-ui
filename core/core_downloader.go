@@ -10,7 +10,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -454,6 +456,75 @@ func (ac *AppController) extractZip(archivePath, destDir string) (string, error)
 	return "", fmt.Errorf("extractZip: sing-box binary not found in archive")
 }
 
+// copyFile copies src to dst (simple file copy for archiving binaries).
+func copyFile(src, dst string) error {
+	s, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	d, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	_, err = io.Copy(d, s)
+	return err
+}
+
+// GetArchivedCoreVersions возвращает список архивных версий sing-box
+// из bin/archive/ (для UI выбора/отката).
+func (ac *AppController) GetArchivedCoreVersions() []string {
+	binDir := filepath.Dir(ac.FileService.SingboxPath)
+	archiveDir := filepath.Join(binDir, "archive")
+	entries, err := os.ReadDir(archiveDir)
+	if err != nil {
+		return nil
+	}
+	ext := platform.GetExecutableExt()
+	var versions []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Format: sing-box-<version>.exe or sing-box-<version>
+		if strings.HasPrefix(name, "sing-box-") && strings.HasSuffix(name, ext) {
+			v := strings.TrimPrefix(name, "sing-box-")
+			v = strings.TrimSuffix(v, ext)
+			versions = append(versions, v)
+		}
+	}
+	return versions
+}
+
+// SwitchToArchivedCoreVersion переключает активный бинарник на указанную
+// архивную версию. Копирует bin/archive/sing-box-<version>.exe → bin/sing-box.exe.
+// Возвращает ошибку если архивной версии нет.
+func (ac *AppController) SwitchToArchivedCoreVersion(version string) error {
+	binDir := filepath.Dir(ac.FileService.SingboxPath)
+	ext := platform.GetExecutableExt()
+	archivePath := filepath.Join(binDir, "archive", fmt.Sprintf("sing-box-%s%s", version, ext))
+	if _, err := os.Stat(archivePath); os.IsNotExist(err) {
+		return fmt.Errorf("archived core version %s not found", version)
+	}
+	// Copy archive back to active binary (installBinary ниже сделает backup уже новой)
+	// Но installBinary перезатрёт текущий — мы хотим из архива → активный.
+	// Просто копируем файл напрямую, старый уйдёт в archive.
+	if err := copyFile(archivePath, ac.FileService.SingboxPath); err != nil {
+		return fmt.Errorf("failed to restore archived core %s: %w", version, err)
+	}
+	if err := platform.ChmodExecutable(ac.FileService.SingboxPath); err != nil {
+		debuglog.WarnLog("SwitchToArchivedCoreVersion: chmod: %v", err)
+	}
+	// Сбросить кеш версии — при следующем GetInstalledCoreVersion перечитает
+	ac.installedCoreVersionCacheMu.Lock()
+	ac.installedCoreVersionCache = ""
+	ac.installedCoreVersionCacheMu.Unlock()
+	debuglog.InfoLog("SwitchToArchivedCoreVersion: switched to %s", version)
+	return nil
+}
+
 // extractTarGz extracts tar.gz archive (Linux/macOS)
 func (ac *AppController) extractTarGz(archivePath, destDir string) (string, error) {
 	file, err := os.Open(archivePath)
@@ -507,22 +578,42 @@ func (ac *AppController) extractTarGz(archivePath, destDir string) (string, erro
 	return "", fmt.Errorf("extractTarGz: sing-box binary not found in archive")
 }
 
-// installBinary copies binary to target directory
+// installBinary copies binary to target directory, archiving the old binary
+// by version name into bin/archive/ for rollback support.
 func (ac *AppController) installBinary(sourcePath, destPath string) error {
-	// Create bin directory if it doesn't exist
 	binDir := filepath.Dir(destPath)
 	if err := os.MkdirAll(binDir, platform.DefaultDirMode); err != nil {
 		return fmt.Errorf("installBinary: failed to create bin directory: %w", err)
 	}
 
-	// If old binary exists, rename it
+	// If old binary exists, archive it by version name before overwriting
 	if _, err := os.Stat(destPath); err == nil {
-		oldPath := destPath + ".old"
-		if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
-			debuglog.WarnLog("installBinary: failed to remove old backup %s: %v", oldPath, err)
+		// Try to detect the old binary version
+		oldVersion := ""
+		cmd := exec.Command(destPath, "version")
+		platform.PrepareCommand(cmd)
+		if output, verr := cmd.CombinedOutput(); verr == nil {
+			outputStr := strings.TrimSpace(string(output))
+			re := regexp.MustCompile(`sing-box version\s+(\S+)`)
+			if m := re.FindStringSubmatch(outputStr); len(m) > 1 {
+				oldVersion = m[1]
+			}
 		}
-		if err := os.Rename(destPath, oldPath); err != nil {
-			debuglog.WarnLog("Warning: failed to rename old binary: %v", err)
+		if oldVersion == "" {
+			// Can't detect — fallback to timestamp-based name
+			oldVersion = fmt.Sprintf("unknown-%d", time.Now().Unix())
+		}
+
+		// Copy old binary to archive before overwriting
+		archiveDir := filepath.Join(binDir, "archive")
+		if err := os.MkdirAll(archiveDir, platform.DefaultDirMode); err == nil {
+			archiveName := fmt.Sprintf("sing-box-%s%s", oldVersion, platform.GetExecutableExt())
+			archivePath := filepath.Join(archiveDir, archiveName)
+			if err := copyFile(destPath, archivePath); err != nil {
+				debuglog.WarnLog("installBinary: failed to archive old binary %s: %v", archiveName, err)
+			} else {
+				debuglog.InfoLog("installBinary: archived old binary to %s", archivePath)
+			}
 		}
 	}
 
@@ -546,12 +637,6 @@ func (ac *AppController) installBinary(sourcePath, destPath string) error {
 
 	if err := platform.ChmodExecutable(destPath); err != nil {
 		debuglog.WarnLog("installBinary: failed to chmod %s: %v", destPath, err)
-	}
-
-	// Remove old backup
-	oldPath := destPath + ".old"
-	if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
-		debuglog.WarnLog("installBinary: failed to remove backup %s: %v", oldPath, err)
 	}
 
 	debuglog.InfoLog("installBinary: binary installed successfully to %s", destPath)

@@ -61,6 +61,29 @@ func (ac *AppController) GetCoreBinaryPath() string {
 	return p
 }
 
+// GetLatestCoreVersion получает последнюю версию sing-box из GitHub releases форка.
+func (ac *AppController) GetLatestCoreVersion() (string, error) {
+	sources := []struct {
+		name string
+		url  string
+	}{
+		{"GitHub API", fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", constants.SingboxCoreRepo)},
+		{"GitHub Mirror (ghproxy)", fmt.Sprintf("https://ghproxy.com/https://api.github.com/repos/%s/releases/latest", constants.SingboxCoreRepo)},
+	}
+
+	for _, source := range sources {
+		debuglog.DebugLog("GetLatestCoreVersion: trying %s...", source.name)
+		version, err := ac.getLatestVersionFromURLWithPrefix(source.url, false)
+		if err == nil {
+			debuglog.InfoLog("GetLatestCoreVersion: got version %s from %s", version, source.name)
+			return version, nil
+		}
+		debuglog.DebugLog("GetLatestCoreVersion: failed from %s: %v", source.name, err)
+	}
+
+	return "", fmt.Errorf("failed to get latest core version from all sources")
+}
+
 // GetLatestLauncherVersion получает последнюю версию лаунчера из GitHub.
 // (Sing-box версия не проверяется — она пиннится через constants.RequiredCoreVersion;
 // см. SPEC 046.)

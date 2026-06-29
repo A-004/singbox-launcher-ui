@@ -40,9 +40,11 @@ type CoreDashboardTab struct {
 	controller *core.AppController
 
 	// UI elements
-	statusLabel               *widget.Label  // Full status: "Core Status" + icon + text
-	singboxStatusLabel        *widget.Label  // sing-box status (version or "not found")
-	singboxHelpBtn            *widget.Button // "?" help button, hidden when Download is hidden
+	statusLabel               *widget.Label    // Full status: "Core Status" + icon + text
+	singboxStatusLabel        *widget.Label    // sing-box status (version or "not found")
+	updateIndicatorBtn        *ttwidget.Button // "⬆" button — shows when new core version is available, click to download
+	versionListBtn            *ttwidget.Button // "☰" button — shows version list popup with archived versions
+	singboxHelpBtn            *widget.Button   // "?" help button, hidden when Download is hidden
 	downloadButton            *widget.Button
 	downloadProgress          *widget.ProgressBar // Progress bar for download
 	downloadContainer         fyne.CanvasObject   // Container for button/progress bar
@@ -463,6 +465,14 @@ func (tab *CoreDashboardTab) createVersionBlock() fyne.CanvasObject {
 	title := widget.NewLabel(locale.T("core.label_singbox"))
 	title.Importance = widget.MediumImportance
 
+	// ⬆ button — update indicator, visible when new core version is available
+	tab.updateIndicatorBtn = ttwidget.NewButton("⬆", func() {
+		tab.handleDownload()
+	})
+	tab.updateIndicatorBtn.Importance = widget.HighImportance
+	tab.updateIndicatorBtn.Hide()
+	tab.updateIndicatorBtn.SetToolTip("New core version available — click to download")
+
 	singboxHelpBtn := widget.NewButton("?", func() {
 		msg := locale.T("core.singbox_help_msg")
 		if suffix := core.SingboxAssetSuffix(); suffix != "" {
@@ -490,6 +500,14 @@ func (tab *CoreDashboardTab) createVersionBlock() fyne.CanvasObject {
 		dialogs.ShowCustom(tab.controller.GetMainWindow(), locale.T("core.dialog_singbox_title"), locale.T("core.dialog_singbox_close"), content)
 	})
 	tab.singboxHelpBtn = singboxHelpBtn
+
+	// ☰ button — version list popup for switching between archived versions
+	tab.versionListBtn = ttwidget.NewButton("☰", func() {
+		tab.showVersionListPopup()
+	})
+	tab.versionListBtn.Importance = widget.MediumImportance
+	tab.versionListBtn.Hide()
+	tab.versionListBtn.SetToolTip("Archived core versions — click to switch")
 
 	tab.singboxStatusLabel = widget.NewLabel(locale.T("core.singbox_status_checking"))
 	tab.singboxStatusLabel.Wrapping = fyne.TextWrapOff
@@ -520,10 +538,89 @@ func (tab *CoreDashboardTab) createVersionBlock() fyne.CanvasObject {
 	return container.NewHBox(
 		title,
 		layout.NewSpacer(),
+		tab.updateIndicatorBtn,
 		tab.singboxStatusLabel,
 		tab.downloadContainer,
+		tab.versionListBtn,
 		tab.singboxHelpBtn,
 	)
+}
+
+// showVersionListPopup показывает попап со списком архивных версий для переключения
+func (tab *CoreDashboardTab) showVersionListPopup() {
+	ac := tab.controller
+	if ac == nil || ac.UIService == nil || ac.UIService.MainWindow == nil {
+		return
+	}
+	archived := ac.GetArchivedCoreVersions()
+	if len(archived) == 0 {
+		dialog.ShowInformation(
+			"Core versions",
+			"No archived versions found. Download a new core first.",
+			ac.UIService.MainWindow,
+		)
+		return
+	}
+
+	installed, _ := ac.GetInstalledCoreVersion()
+	if installed == "" {
+		installed = "?"
+	}
+
+	var items []*fyne.MenuItem
+	for _, v := range archived {
+		v := v // capture
+		label := v
+		if v == installed {
+			label = "✓ " + v
+		}
+		item := fyne.NewMenuItem(label, func() {
+			if v == installed {
+				return
+			}
+			if err := ac.SwitchToArchivedCoreVersion(v); err != nil {
+				ShowError(ac.UIService.MainWindow, err)
+				return
+			}
+			// Refresh UI
+			_ = tab.updateVersionInfo()
+			tab.updateBinaryStatus()
+			ShowInfo(ac.UIService.MainWindow, "Core version switched",
+				fmt.Sprintf("Switched to core version %s", v))
+		})
+		items = append(items, item)
+	}
+
+	menu := fyne.NewMenu("", items...)
+	pop := widget.NewPopUpMenu(menu, ac.UIService.MainWindow.Canvas())
+	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(tab.versionListBtn)
+	pop.ShowAtPosition(fyne.NewPos(pos.X, pos.Y+tab.versionListBtn.Size().Height))
+}
+
+// checkAndShowUpdateButton проверяет наличие новой версии core и показывает ⬆
+func (tab *CoreDashboardTab) checkAndShowUpdateButton() {
+	go func() {
+		latest, err := tab.controller.GetLatestCoreVersion()
+		if err != nil {
+			debuglog.DebugLog("checkAndShowUpdateButton: failed to get latest core version: %v", err)
+			return
+		}
+		installed, err := tab.controller.GetInstalledCoreVersion()
+		if err != nil {
+			debuglog.DebugLog("checkAndShowUpdateButton: cannot get installed version: %v", err)
+			return
+		}
+		if core.CompareVersions(installed, latest) >= 0 {
+			debuglog.DebugLog("checkAndShowUpdateButton: installed %s >= latest %s, no update", installed, latest)
+			return
+		}
+		fyne.Do(func() {
+			if tab.updateIndicatorBtn != nil {
+				tab.updateIndicatorBtn.Show()
+				tab.updateIndicatorBtn.Refresh()
+			}
+		})
+	}()
 }
 
 // readConfigOnDemand triggers a UI status refresh and logs the canonical
