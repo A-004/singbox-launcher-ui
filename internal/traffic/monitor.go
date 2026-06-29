@@ -23,13 +23,13 @@ type connectionsResponse struct {
 // and delivers TrafficStats through a channel.
 // Auto-reconnects every 3s on error.
 type Monitor struct {
-	mu       sync.Mutex
-	cfg      ClashConfig
-	client   *http.Client
-	ticker   *time.Ticker
-	stopCh   chan struct{}
-	statsCh  chan TrafficStats
-	running  bool
+	mu      sync.Mutex
+	cfg     ClashConfig
+	client  *http.Client
+	ticker  *time.Ticker
+	stopCh  chan struct{}
+	statsCh chan TrafficStats
+	running bool
 
 	// previous snapshot for speed calculation
 	prevDownload int64
@@ -40,8 +40,8 @@ type Monitor struct {
 // NewMonitor creates a stopped Monitor. Call Start() to begin polling.
 func NewMonitor(cfg ClashConfig) *Monitor {
 	return &Monitor{
-		cfg: cfg,
-		client: &http.Client{Timeout: 4 * time.Second},
+		cfg:     cfg,
+		client:  &http.Client{Timeout: 4 * time.Second},
 		statsCh: make(chan TrafficStats, 8),
 		stopCh:  make(chan struct{}),
 	}
@@ -110,9 +110,11 @@ func (m *Monitor) pollLoop() {
 func (m *Monitor) sample() {
 	curDl, curUl, err := m.fetchTotals()
 	if err != nil {
-		// API not ready — send zeros, retry after delay.
-		m.statsCh <- NewTrafficStats(0, 0)
-		time.Sleep(reconnectDelay)
+		// API not ready — don't send zeros, don't sleep. Just skip
+		// this sample and let the next tick (1s) retry naturally.
+		// Previously we pushed (0, 0) and blocked the loop for 3s,
+		// which caused connected → zeros → connected flicker when
+		// the API briefly stutters.
 		return
 	}
 
@@ -168,5 +170,3 @@ func (m *Monitor) fetchTotals() (int64, int64, error) {
 
 	return cr.DownloadTotal, cr.UploadTotal, nil
 }
-
-
