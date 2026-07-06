@@ -122,15 +122,10 @@ func buildHysteria2TLS(node *configtypes.ParsedNode, outbound map[string]interfa
 		tlsData["alpn"] = []string{"h3"}
 	}
 
-	// uTLS fingerprint — from URI, else present with factory defaults.
-	fp := NormalizeUTLSFingerprint(queryGetFold(q, "fp"))
-	if fp == "" {
-		fp = NormalizeUTLSFingerprint(queryGetFold(q, "fingerprint"))
-	}
-	tlsData["utls"] = map[string]interface{}{
-		"enabled":     fp != "",
-		"fingerprint": fp,
-	}
+	// NOTE: uTLS fingerprint is NOT applicable to Hysteria2.
+	// Hysteria2 uses QUIC (UDP), and uTLS (TLS fingerprint imitation) works only
+	// over TCP+TLS. Adding utls block to hysteria2 causes TLS handshake to hang.
+	// Any fp/fingerprint URI params are silently ignored.
 
 	// certificate_public_key_sha256 (pinSHA256)
 	if pin := strings.TrimSpace(queryGetFold(q, "pinSHA256")); pin != "" {

@@ -245,43 +245,42 @@ func (tab *CoreDashboardTab) updateConfigInfo() {
 }
 
 // updateVersionInfo обновляет информацию о версии sing-box и подпись кнопки
-// Download/Reinstall по сравнению с pinned `constants.RequiredCoreVersion`
-// (SPEC 046).
+// Download.
 //
-// `GetInstalledCoreVersion()` может долго выполняться (запуск
-// `sing-box version` на медленной системе), поэтому вызов вынесен в
-// горутину; UI обновляется через fyne.Do. Никаких сетевых походов отсюда
-// не делается — версия pinned, не «свежайшая из GitHub».
+// Правила показа кнопки:
+//   - Бинарника нет → «Download vLATEST» (latestCoreVersion, если есть, иначе RequiredCoreVersion)
+//   - Бинарник есть → кнопка скрыта (никакого "Reinstall")
+//
+// `GetInstalledCoreVersion()` и `GetLatestCoreVersion()` могут долго выполняться,
+// поэтому вызов вынесен в горутину; UI обновляется через fyne.Do.
 func (tab *CoreDashboardTab) updateVersionInfo() error {
 	go func() {
 		installedVersion, err := tab.controller.GetInstalledCoreVersion()
 		required := constants.RequiredCoreVersion
 		fyne.Do(func() {
 			tab.singboxStatusLabel.Importance = widget.MediumImportance
-			switch {
-			case err != nil:
-				// Бинарника нет — синяя «Download vX.Y.Z», подталкиваем к
-				// первичной установке.
+
+			if err != nil {
+				// Бинарника нет — показываем "Download v...".
+				// Используем latestCoreVersion если найден, иначе RequiredCoreVersion
+				// (потом checkAndShowUpdateButton обновит если сможет).
+				downloadVersion := required
+				if tab.latestCoreVersion != "" {
+					downloadVersion = tab.latestCoreVersion
+				}
 				tab.downloadButton.Importance = widget.HighImportance
 				tab.setSingboxState(
 					locale.T("core.singbox_status_not_found"),
-					locale.Tf("core.button_download_version", required),
+					locale.Tf("core.button_download_version", downloadVersion),
 					-1,
 				)
-			case installedVersion != required:
-				// Стоит другая версия — нейтральная «Reinstall vX.Y.Z», без
-				// подталкивания: пользователь мог поставить вручную.
-				tab.downloadButton.Importance = widget.MediumImportance
-				tab.setSingboxState(
-					installedVersion,
-					locale.Tf("core.button_reinstall_version", required),
-					-1,
-				)
-			default:
-				// Версия совпадает — кнопка скрыта.
+			} else {
+				// Бинарник есть — кнопка скрыта.
 				tab.setSingboxState(installedVersion, "", -1)
 			}
-			// Проверить наличие новой версии core (покажет ⬆ если есть)
+			// Проверить наличие новой версии core (покажет ⬆ если есть).
+			// Этот же метод при отсутствии бинарника сохранит latestCoreVersion
+			// и обновит кнопку на "Download v[latest]".
 			tab.checkAndShowUpdateButton()
 			// Показать/скрыть ☰ если есть архивные версии
 			if tab.versionListBtn != nil {

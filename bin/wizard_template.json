@@ -105,18 +105,6 @@
         "ipv6_only"
       ]
     },
-    {"name": "auto_detect_interface", "type": "bool", "wizard_ui": "edit", "title": "Auto-detect outbound interface", "tooltip": "sing-box route.auto_detect_interface: detect default interface for outbound; turn off if routing is wrong with multiple uplinks.",
-      "default_value": "true"
-    },
-    {"separator": true},
-    {"name": "ping_method", "type": "enum", "wizard_ui": "edit", "title": "Ping method", "tooltip": "Direct ping method from device to proxy server. ICMP (recommended, requires admin rights), TCP (port connect, no admin), HTTP (Clash API urltest, measures proxy-to-target latency).",
-      "default_value": "icmp",
-      "options": [
-        {"title": "ICMP", "value": "icmp"},
-        {"title": "TCP", "value": "tcp"},
-        {"title": "HTTP", "value": "http"}
-      ]
-    },
     {"name": "cert_store", "type": "enum", "wizard_ui": "edit", "title": "TLS root certificate store", "tooltip": "sing-box certificate.store — which CA bundle to trust for outbound TLS validation. 'system' uses your OS cert store. 'mozilla' / 'chrome' use built-in bundles, useful when the OS store is broken (e.g. Windows updates not applied, or x509 'unknown authority' errors). 'none' disables CA validation entirely — only for testing. https://sing-box.sagernet.org/configuration/certificate/",
       "default_value": "system",
       "options": [
@@ -218,7 +206,7 @@
         {"protocol": "dns", "action": "hijack-dns"}
       ],
       "final": "@route_final",
-      "auto_detect_interface": "@auto_detect_interface",
+      "auto_detect_interface": true,
       "find_process": true
     },
     "experimental": {

@@ -76,6 +76,15 @@ type CoreDashboardTab struct {
 	downloadInProgress       bool // Flag for sing-box download process
 	wintunDownloadInProgress bool // Flag for wintun.dll download process
 
+	// Latest core version found by checkAndShowUpdateButton.
+	// When non-empty, ⬆ button downloads this version instead of RequiredCoreVersion.
+	// Cleared after successful download so updateVersionInfo compares against it.
+	latestCoreVersion string
+
+	// The version that was just downloaded. When installed == lastDownloadedVersion,
+	// the download button is hidden (no "Reinstall" shown).
+	lastDownloadedVersion string
+
 	// Traffic monitor
 	trafficWidget *traffic.Widget
 }
@@ -603,7 +612,11 @@ func (tab *CoreDashboardTab) showVersionListPopup() {
 	pop.ShowAtPosition(fyne.NewPos(pos.X, pos.Y+tab.versionListBtn.Size().Height))
 }
 
-// checkAndShowUpdateButton проверяет наличие новой версии core и показывает ⬆
+// checkAndShowUpdateButton проверяет наличие новой версии core и показывает ⬆.
+// Проверяет не только версию, но и существование windows-amd64 ассета в релизе.
+//
+// Если бинарника нет — сохраняет latestCoreVersion, чтобы updateVersionInfo
+// показала "Download v[latest]" на кнопке (а не захардкоженную версию).
 func (tab *CoreDashboardTab) checkAndShowUpdateButton() {
 	go func() {
 		latest, err := tab.controller.GetLatestCoreVersion()
@@ -611,22 +624,52 @@ func (tab *CoreDashboardTab) checkAndShowUpdateButton() {
 			debuglog.DebugLog("checkAndShowUpdateButton: failed to get latest core version: %v", err)
 			return
 		}
-		installed, err := tab.controller.GetInstalledCoreVersion()
-		if err != nil {
-			debuglog.DebugLog("checkAndShowUpdateButton: cannot get installed version: %v", err)
+
+		// Verify that the latest release actually has a windows-amd64 asset.
+		if !tab.coreReleaseHasWindowsAsset(latest) {
+			debuglog.DebugLog("checkAndShowUpdateButton: latest release %s has no windows-amd64 asset, skipping", latest)
 			return
 		}
+
+		installed, err := tab.controller.GetInstalledCoreVersion()
+		if err != nil {
+			// Binary not found — save latest version so updateVersionInfo
+			// can show "Download v[latest]" on the button (dynamic, not hardcoded).
+			fyne.Do(func() {
+				tab.latestCoreVersion = latest
+				_ = tab.updateVersionInfo()
+			})
+			return
+		}
+
 		if core.CompareVersions(installed, latest) >= 0 {
 			debuglog.DebugLog("checkAndShowUpdateButton: installed %s >= latest %s, no update", installed, latest)
 			return
 		}
+
 		fyne.Do(func() {
+			tab.latestCoreVersion = latest
 			if tab.updateIndicatorBtn != nil {
 				tab.updateIndicatorBtn.Show()
 				tab.updateIndicatorBtn.Refresh()
 			}
 		})
 	}()
+}
+
+// coreReleaseHasWindowsAsset проверяет, что указанный релиз содержит windows-amd64 ассет.
+func (tab *CoreDashboardTab) coreReleaseHasWindowsAsset(version string) bool {
+	release, err := tab.controller.GetReleaseInfoForVersion(version)
+	if err != nil {
+		debuglog.DebugLog("coreReleaseHasWindowsAsset: failed to get release info for %s: %v", version, err)
+		return false
+	}
+	_, err = tab.controller.FindPlatformAsset(release.Assets)
+	if err != nil {
+		debuglog.DebugLog("coreReleaseHasWindowsAsset: no windows-amd64 asset in release %s: %v", version, err)
+		return false
+	}
+	return true
 }
 
 // readConfigOnDemand triggers a UI status refresh and logs the canonical
@@ -1050,9 +1093,10 @@ func (tab *CoreDashboardTab) downloadConfigTemplate() {
 	}()
 }
 
-// handleDownload обрабатывает нажатие на кнопку Download/Reinstall.
-// Версия не выбирается пользователем — DownloadCore сам подставит pinned
-// `constants.RequiredCoreVersion` (форк-тег для всех платформ, вкл. windows/386), см. SPEC 046.
+// handleDownload обрабатывает нажатие на кнопку Download/Reinstall/⬆.
+// Если latestCoreVersion установлена (через checkAndShowUpdateButton),
+// скачивает эту версию, а не pinned RequiredCoreVersion.
+// ⬆ кнопка скрывается сразу при начале загрузки.
 func (tab *CoreDashboardTab) handleDownload() {
 	if tab.downloadInProgress {
 		return
@@ -1061,13 +1105,26 @@ func (tab *CoreDashboardTab) handleDownload() {
 	tab.downloadButton.Disable()
 	tab.setSingboxState("", "", 0.0)
 
+	// Hide the ⬆ update indicator immediately when download starts
+	if tab.updateIndicatorBtn != nil {
+		tab.updateIndicatorBtn.Hide()
+		tab.updateIndicatorBtn.Refresh()
+	}
+
+	// Determine which version to download.
+	// If latestCoreVersion is set (via ⬆ button), use it.
+	// Otherwise use the pinned RequiredCoreVersion (manual download button).
+	downloadVersion := tab.latestCoreVersion
+	if downloadVersion == "" {
+		downloadVersion = constants.RequiredCoreVersion
+	}
+
 	progressChan := make(chan core.DownloadProgress, 10)
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		// Empty version → DownloadCore uses constants.RequiredCoreVersion.
-		tab.controller.DownloadCore(ctx, "", progressChan)
+		tab.controller.DownloadCore(ctx, downloadVersion, progressChan)
 	}()
 
 	go func() {
@@ -1079,13 +1136,24 @@ func (tab *CoreDashboardTab) handleDownload() {
 				switch progress.Status {
 				case "done":
 					tab.downloadInProgress = false
+					// Remember what we just downloaded, so updateVersionInfo
+					// can hide the download button (no "Reinstall" shown for
+					// the version that was just installed).
+					tab.lastDownloadedVersion = downloadVersion
+					tab.latestCoreVersion = ""
+					// Reset version cache so GetInstalledCoreVersion re-reads
+					// the real installed version of the new binary.
+					tab.controller.ResetInstalledCoreVersionCache()
 					// Refresh: clears binary-not-found state + button label.
 					_ = tab.updateVersionInfo()
 					tab.updateBinaryStatus()
 					ShowInfo(tab.controller.GetMainWindow(), locale.T("core.dialog_download_complete_title"), progress.Message)
 				case "error":
 					tab.downloadInProgress = false
-					tab.setSingboxState("", locale.Tf("core.button_download_version", constants.RequiredCoreVersion), -1)
+					// After error, keep latestCoreVersion so the user can retry ⬆
+					// (the button was hidden but updateVersionInfo will re-evaluate).
+					_ = tab.updateVersionInfo()
+					tab.setSingboxState("", locale.Tf("core.button_download_version", downloadVersion), -1)
 					binDir := filepath.Join(tab.controller.FileService.ExecDir, constants.BinDirName)
 					debuglog.DebugLog("core_dashboard: showing download failed manual (sing-box)")
 					dialogs.ShowDownloadFailedManual(tab.controller.GetMainWindow(), "sing-box download failed", constants.SingboxReleasesURL, binDir)

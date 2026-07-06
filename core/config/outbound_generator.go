@@ -323,17 +323,22 @@ func GenerateNodeJSON(node *ParsedNode) (string, error) {
 					tlsParts = append(tlsParts, fmt.Sprintf(`"alpn":%s`, string(alpnJSON)))
 				}
 
-				if utls, ok := tlsData["utls"].(map[string]interface{}); ok {
-					var utlsParts []string
-					if utlsEnabled, ok := utls["enabled"].(bool); ok {
-						utlsParts = append(utlsParts, fmt.Sprintf(`"enabled":%v`, utlsEnabled))
+				// Hysteria2 uses QUIC (UDP), uTLS fingerprint is only meaningful
+				// over TCP+TLS. Skip utls block entirely for hysteria2 — it would
+				// cause TLS handshake to hang.
+				if node.Scheme != "hysteria2" {
+					if utls, ok := tlsData["utls"].(map[string]interface{}); ok {
+						var utlsParts []string
+						if utlsEnabled, ok := utls["enabled"].(bool); ok {
+							utlsParts = append(utlsParts, fmt.Sprintf(`"enabled":%v`, utlsEnabled))
+						}
+						if fingerprint, ok := utls["fingerprint"].(string); ok {
+							fingerprint = subscription.NormalizeUTLSFingerprint(fingerprint)
+							utlsParts = append(utlsParts, fmt.Sprintf(`"fingerprint":%s`, marshalJSONString(fingerprint)))
+						}
+						utlsJSON := "{" + strings.Join(utlsParts, ",") + "}"
+						tlsParts = append(tlsParts, fmt.Sprintf(`"utls":%s`, utlsJSON))
 					}
-					if fingerprint, ok := utls["fingerprint"].(string); ok {
-						fingerprint = subscription.NormalizeUTLSFingerprint(fingerprint)
-						utlsParts = append(utlsParts, fmt.Sprintf(`"fingerprint":%s`, marshalJSONString(fingerprint)))
-					}
-					utlsJSON := "{" + strings.Join(utlsParts, ",") + "}"
-					tlsParts = append(tlsParts, fmt.Sprintf(`"utls":%s`, utlsJSON))
 				}
 
 				if insecure, ok := tlsData["insecure"].(bool); ok && insecure {

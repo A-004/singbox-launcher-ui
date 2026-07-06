@@ -141,15 +141,37 @@ func (m *Monitor) pollLoop() {
 	m.measurePing()
 
 	tickCount := 0
+	consecutiveFails := 0
 	for {
 		select {
 		case <-m.ticker.C:
 			tickCount++
-			m.measurePing()
+			hadPing := m.measurePing()
 
-			if tickCount%15 == 0 {
-				m.resolveServerIP()
+			if hadPing {
+				consecutiveFails = 0
+			} else {
+				consecutiveFails++
 			}
+
+			// Re-resolve server IP aggressively:
+			//   - every 15 ticks normally
+			//   - every 5 ticks when pings keep failing (server may have changed)
+			//   - immediately after 3 consecutive fails
+			triggerResolve := tickCount%15 == 0
+			if !hadPing {
+				triggerResolve = triggerResolve || consecutiveFails >= 3 || tickCount%5 == 0
+			}
+			if triggerResolve {
+				m.resolveServerIP()
+				// If we got a new IP, reset fail counter
+				m.mu.Lock()
+				if m.serverIP != "" {
+					consecutiveFails = 0
+				}
+				m.mu.Unlock()
+			}
+
 			m.sample()
 
 		case <-m.stopCh:
@@ -238,8 +260,9 @@ func (m *Monitor) resolveServerIP() {
 	}
 }
 
-// measurePing does TCP connect. Measures RTT from ANY response (SYN-ACK or RST).
-func (m *Monitor) measurePing() {
+// measurePing does TCP connect. Returns true if a measurement was obtained
+// (even if the port returned RST). Returns false if no IP or all ports timed out.
+func (m *Monitor) measurePing() bool {
 	m.mu.Lock()
 	ip := m.serverIP
 	bindIP := m.localIP
@@ -249,7 +272,7 @@ func (m *Monitor) measurePing() {
 		m.mu.Lock()
 		m.pingInfo = "No server IP (STUN pending)"
 		m.mu.Unlock()
-		return
+		return false
 	}
 
 	d, info := tcpingDiagnostic(ip, bindIP, 2*time.Second)
@@ -258,6 +281,7 @@ func (m *Monitor) measurePing() {
 	m.lastDelayMs = d
 	m.pingInfo = info
 	m.mu.Unlock()
+	return d > 0
 }
 
 // MeasureServerDelay returns RTT in ms, -1 on failure.
@@ -367,8 +391,12 @@ func (m *Monitor) fetchTotals() (int64, int64, error) {
 }
 
 // tcpingDiagnostic does TCP connect on multiple ports and returns (RTT_ms, diag_string).
+// Each port is given at most perPortTimeout; total time is capped at ~len(ports)*perPortTimeout.
 func tcpingDiagnostic(ip, bindIP string, timeout time.Duration) (int64, string) {
-	ports := []int{443, 80, 22, 8080, 8443}
+	ports := []int{443, 80, 22, 4500, 8080, 8443}
+	// Per-port timeout: 500ms is enough to detect SYN-ACK or RST on typical links.
+	// This prevents the whole monitor from freezing when the first few ports time out.
+	perPortTimeout := 500 * time.Millisecond
 	bestMs := int64(-1)
 	bestInfo := ""
 
@@ -397,8 +425,8 @@ func tcpingDiagnostic(ip, bindIP string, timeout time.Duration) (int64, string) 
 			return ms, info
 		}
 
-		if ms > 0 && ms < int64(timeout.Milliseconds())/2 {
-			// RST = port closed, but server responded
+		// Fast error = RST (port closed) = valid RTT
+		if ms > 0 && ms < int64(perPortTimeout.Milliseconds()) {
 			info := fmt.Sprintf("TCP %d%s: RST %dms", port, bindNote, ms)
 			if bestMs < 0 || ms < bestMs {
 				bestMs = ms
@@ -407,12 +435,12 @@ func tcpingDiagnostic(ip, bindIP string, timeout time.Duration) (int64, string) 
 			continue
 		}
 
-		// Full timeout
+		// Full timeout — try next port
 		continue
 	}
 
 	if bestMs > 0 {
 		return bestMs, bestInfo
 	}
-	return -1, fmt.Sprintf("TCP %s%s: all ports timeout (2s)", ip, bindNote)
+	return -1, fmt.Sprintf("TCP %s%s: all %d ports timeout", ip, bindNote, len(ports))
 }

@@ -66,6 +66,7 @@ func main() {
 	// Load locale settings and external translations
 	binDir := platform.GetBinDir(controller.FileService.ExecDir)
 	locale.LoadExternalLocales(locale.GetLocaleDir(binDir))
+
 	settings := locale.LoadSettings(binDir)
 	locale.SetLang(settings.Lang)
 	if settings.PingTestURL != "" {

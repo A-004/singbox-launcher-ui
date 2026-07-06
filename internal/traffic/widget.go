@@ -13,12 +13,10 @@ var (
 	activeColor   = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0xFF} // green
 	inactiveColor = color.NRGBA{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF} // gray
 
-	// ping color thresholds
-	pingGreen  = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0xFF} // <70ms — green
-	pingYellow = color.NRGBA{R: 0xFF, G: 0x9F, B: 0x0A, A: 0xFF} // 70-105ms — yellow/orange
-	pingRed    = color.NRGBA{R: 0xFF, G: 0x45, B: 0x3A, A: 0xFF} // >105ms — red
-
-	pingLabel = "⬡" // symbol for ping line (matches ↓/↑ style)
+	// delay color thresholds
+	delayGreen  = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0xFF} // <= 70ms
+	delayYellow = color.NRGBA{R: 0xFF, G: 0x9F, B: 0x0A, A: 0xFF} // 71-105ms
+	delayRed    = color.NRGBA{R: 0xFF, G: 0x45, B: 0x3A, A: 0xFF} // > 105ms
 )
 
 // Widget is a ready-to-use Fyne widget that displays real-time download/upload
@@ -35,11 +33,6 @@ type Widget struct {
 	infoText  *canvas.Text
 	status    *canvas.Text
 	refresh   *widget.Button
-
-	// diagnostic expand/collapse
-	detailBtn   *widget.Button
-	detailBox   *fyne.Container
-	detailsOpen bool
 
 	compact bool
 }
@@ -62,17 +55,19 @@ func NewWidget(cfg ClashConfig) *Widget {
 	w.upText.TextSize = 15
 	w.upText.TextStyle = fyne.TextStyle{Bold: false}
 
-	// Ping line — ⬡ symbol + delay
-	w.pingText = canvas.NewText(pingLabel+" N/A", inactiveColor)
-	w.pingText.TextSize = 13
+	// Ping line — uses ⏱ symbol instead of 📡
+	w.pingText = canvas.NewText("⏱ N/A", inactiveColor)
+	w.pingText.TextSize = 12
 
-	// Diagnostic lines (hidden by default)
+	// Proxy tag line (which proxy is active)
 	w.proxyText = canvas.NewText("Proxy: —", inactiveColor)
 	w.proxyText.TextSize = 10
 
+	// Server address line (address being pinged)
 	w.addrText = canvas.NewText("Ping: —", inactiveColor)
 	w.addrText.TextSize = 10
 
+	// Diagnostic info line (what the monitor is doing)
 	w.infoText = canvas.NewText("Info: starting...", inactiveColor)
 	w.infoText.TextSize = 10
 
@@ -105,30 +100,12 @@ func (w *Widget) Stop() {
 
 // Container returns the root Fyne object for embedding.
 func (w *Widget) Container() fyne.CanvasObject {
-	// Ping row: ⬡ label + [▼] toggle
-	w.detailBtn = widget.NewButton("▶", w.toggleDetails)
-	w.detailBtn.Importance = widget.LowImportance
-
-	pingRow := container.NewHBox(w.pingText, w.detailBtn)
-
-	// Detail rows — start hidden
-	w.proxyText.Hide()
-	w.addrText.Hide()
-	w.infoText.Hide()
-
+	dlRow := container.NewHBox(w.dlText)
+	upRow := container.NewHBox(w.upText)
+	pingRow := container.NewHBox(w.pingText)
 	proxyRow := container.NewHBox(w.proxyText)
 	addrRow := container.NewHBox(w.addrText)
 	infoRow := container.NewHBox(w.infoText)
-
-	w.detailBox = container.NewVBox(
-		proxyRow,
-		addrRow,
-		infoRow,
-	)
-	w.detailBox.Hide()
-
-	dlRow := container.NewHBox(w.dlText)
-	upRow := container.NewHBox(w.upText)
 	statusRow := container.NewHBox(w.status)
 
 	ctrlRow := container.NewHBox(
@@ -137,7 +114,9 @@ func (w *Widget) Container() fyne.CanvasObject {
 
 	body := container.NewVBox(
 		container.NewPadded(pingRow),
-		w.detailBox,
+		container.NewPadded(proxyRow),
+		container.NewPadded(addrRow),
+		container.NewPadded(infoRow),
 		container.NewPadded(dlRow),
 		container.NewPadded(upRow),
 		statusRow,
@@ -155,31 +134,18 @@ func (w *Widget) Container() fyne.CanvasObject {
 	return container.NewStack(bg, border, container.NewPadded(body))
 }
 
-// toggleDetails expands/collapses the diagnostic detail panel.
-func (w *Widget) toggleDetails() {
-	w.detailsOpen = !w.detailsOpen
-	if w.detailsOpen {
-		w.detailBtn.SetText("▼")
-		w.detailBox.Show()
-	} else {
-		w.detailBtn.SetText("▶")
-		w.detailBox.Hide()
-	}
-}
-
-// pingColor returns the color based on delay threshold.
-func pingColor(delayMs int64) color.Color {
+// delayColor returns the color for a given delay in ms.
+func delayColor(delayMs int64) color.Color {
 	if delayMs <= 0 {
 		return inactiveColor
 	}
-	switch {
-	case delayMs < 70:
-		return pingGreen
-	case delayMs < 105:
-		return pingYellow
-	default:
-		return pingRed
+	if delayMs <= 70 {
+		return delayGreen
 	}
+	if delayMs <= 105 {
+		return delayYellow
+	}
+	return delayRed
 }
 
 // statsLoop reads from the monitor channel and updates the UI labels.
@@ -190,13 +156,10 @@ func (w *Widget) statsLoop() {
 		fyne.Do(func() {
 			w.dlText.Text = "↓ " + s.DownStr
 			w.upText.Text = "↑ " + s.UpStr
+			w.pingText.Text = "⏱ " + s.ServerDelayStr
+			w.pingText.Color = delayColor(s.ServerDelayMs)
 
-			// Ping line with color
-			pc := pingColor(s.ServerDelayMs)
-			w.pingText.Text = pingLabel + " " + s.ServerDelayStr
-			w.pingText.Color = pc
-
-			// Update diagnostic info (hidden behind ▶ button)
+			// Update diagnostic info
 			if s.ProxyTag != "" {
 				w.proxyText.Text = "Proxy: " + s.ProxyTag
 			} else {
@@ -211,6 +174,7 @@ func (w *Widget) statsLoop() {
 			} else {
 				w.addrText.Text = "Ping: —"
 			}
+			// Diagnostic info
 			if s.PingInfo != "" {
 				w.infoText.Text = "Info: " + s.PingInfo
 			} else {
@@ -236,7 +200,6 @@ func (w *Widget) statsLoop() {
 			canvas.Refresh(w.addrText)
 			canvas.Refresh(w.infoText)
 			canvas.Refresh(w.status)
-			canvas.Refresh(w.detailBtn)
 		})
 	}
 }

@@ -17,6 +17,15 @@ import (
 	"singbox-launcher/internal/platform"
 )
 
+// ResetInstalledCoreVersionCache сбрасывает кеш установленной версии sing-box.
+// Нужно вызывать после установки нового бинарника (скачивания/переключения версии),
+// чтобы следующий GetInstalledCoreVersion перечитал реальную версию.
+func (ac *AppController) ResetInstalledCoreVersionCache() {
+	ac.installedCoreVersionCacheMu.Lock()
+	defer ac.installedCoreVersionCacheMu.Unlock()
+	ac.installedCoreVersionCache = ""
+}
+
 // GetInstalledCoreVersion получает установленную версию sing-box.
 // После первой успешной проверки в этой сессии возвращает закешированное
 // значение без повторного запуска `sing-box version`.

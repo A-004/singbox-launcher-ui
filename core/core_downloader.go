@@ -132,6 +132,36 @@ func (ac *AppController) getReleaseInfo(ctx context.Context, version string) (*R
 	return ac.getReleaseInfoFromGitHub(ctx, version)
 }
 
+// GetReleaseInfoForVersion публичный метод для получения ReleaseInfo о версии.
+// Нужен UI (core_dashboard_tab) для проверки наличия windows-amd64 ассета.
+func (ac *AppController) GetReleaseInfoForVersion(version string) (*ReleaseInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), NetworkRequestTimeout)
+	defer cancel()
+	return ac.getReleaseInfoFromGitHub(ctx, version)
+}
+
+// findPlatformAsset finds the correct asset for current platform
+func (ac *AppController) findPlatformAsset(assets []Asset) (*Asset, error) {
+	platformPattern := SingboxAssetSuffix()
+	if platformPattern == "" {
+		return nil, fmt.Errorf("findPlatformAsset: unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	for i := range assets {
+		if strings.Contains(assets[i].Name, platformPattern) {
+			return &assets[i], nil
+		}
+	}
+
+	return nil, fmt.Errorf("findPlatformAsset: asset not found for platform %s/%s", runtime.GOOS, runtime.GOARCH)
+}
+
+// FindPlatformAsset публичный метод для поиска ассета текущей платформы.
+// Нужен UI (core_dashboard_tab) для проверки наличия ассета в релизе.
+func (ac *AppController) FindPlatformAsset(assets []Asset) (*Asset, error) {
+	return ac.findPlatformAsset(assets)
+}
+
 // getReleaseInfoFromGitHub gets release information from GitHub. `version`
 // must be non-empty (DownloadCore guarantees this since SPEC 046 — there is
 // no longer a /releases/latest path).
@@ -217,22 +247,6 @@ func SingboxAssetSuffix() string {
 	default:
 		return ""
 	}
-}
-
-// findPlatformAsset finds the correct asset for current platform
-func (ac *AppController) findPlatformAsset(assets []Asset) (*Asset, error) {
-	platformPattern := SingboxAssetSuffix()
-	if platformPattern == "" {
-		return nil, fmt.Errorf("findPlatformAsset: unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
-	}
-
-	for i := range assets {
-		if strings.Contains(assets[i].Name, platformPattern) {
-			return &assets[i], nil
-		}
-	}
-
-	return nil, fmt.Errorf("findPlatformAsset: asset not found for platform %s/%s", runtime.GOOS, runtime.GOARCH)
 }
 
 // downloadFile downloads a file with progress tracking (with a GitHub mirror fallback)
