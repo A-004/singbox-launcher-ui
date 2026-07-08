@@ -147,9 +147,17 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 	// Group 6: Subscription toast
 	toastBlock := tab.createSubsStatusBlock()
 
-	body := container.NewVBox(
-		statusCard,
-		NewAppleSeparator(),
+	// Адаптивная раскладка: в узком режиме панели друг под другом,
+	// в широком (>901px) — две колонки: слева инфо, справа управление.
+	// Внешний Scroll — один на весь контент.
+	//
+	// AdaptiveDashboardLayout располагает children так:
+	//   [0] — в узком режиме сверху, в широком слева
+	//   [1] — в узком режиме снизу, в широком справа
+	// Ставим power button первой (будет сверху в вертикальном режиме).
+	powerPanel := container.NewVBox(statusCard)
+
+	infoPanel := container.NewVBox(
 		trafficCard,
 		NewAppleSeparator(),
 		coreInfo,
@@ -157,6 +165,8 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 		stateCard,
 		toastBlock,
 	)
+
+	body := container.New(NewAdaptiveDashboardLayout(), powerPanel, infoPanel)
 	content := container.NewScroll(body)
 
 	// Регистрируем callback для обновления статуса при изменении RunningState

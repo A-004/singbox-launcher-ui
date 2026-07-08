@@ -15,20 +15,22 @@ import (
 
 const reconnectDelay = 3 * time.Second
 const stunDefaultServer = "stun.l.google.com:19302"
+const geoServiceURL = "https://am.i.mullvad.net/json"
+const geoPollInterval = 60 * time.Second
 
 type connectionsResponse struct {
 	DownloadTotal int64 `json:"downloadTotal"`
 	UploadTotal   int64 `json:"uploadTotal"`
 }
 
-// Monitor polls the Clash API /connections endpoint every second,
-// computes download/upload speeds, resolves external IP via STUN
-// (through the VPN tunnel) and measures TCP ping delay to that IP.
+// Monitor polls the Clash API /connections endpoint every 2 seconds,
+// resolves external IP via STUN, measures TCP ping delay every 3 seconds,
+// and fetches geo-location every 60s — all independently so a failure
+// in one doesn't block the others.
 type Monitor struct {
 	mu      sync.Mutex
 	cfg     ClashConfig
 	client  *http.Client
-	ticker  *time.Ticker
 	stopCh  chan struct{}
 	statsCh chan TrafficStats
 	running bool
@@ -43,6 +45,9 @@ type Monitor struct {
 	localIP     string // non-VPN interface IP for binding
 	lastDelayMs int64
 	pingInfo    string // diagnostic text for the UI
+
+	lastGeo     GeoInfo
+	lastGeoTime time.Time
 }
 
 func NewMonitor(cfg ClashConfig) *Monitor {
@@ -110,7 +115,6 @@ func (m *Monitor) Start() {
 	}
 	m.running = true
 	m.stopCh = make(chan struct{})
-	m.ticker = time.NewTicker(1 * time.Second)
 	m.mu.Unlock()
 	go m.pollLoop()
 }
@@ -122,10 +126,49 @@ func (m *Monitor) Stop() {
 		return
 	}
 	m.running = false
-	if m.ticker != nil {
-		m.ticker.Stop()
-	}
 	close(m.stopCh)
+}
+
+// fetchGeo получает геолокацию через Mullvad API (через VPN-туннель).
+// Использует отдельный HTTP-клиент без привязки к интерфейсу, чтобы
+// запрос гарантированно шёл через VPN-туннель (основной маршрут системы).
+// При ошибке (или выключенном VPN) Geo остаётся пустым.
+func (m *Monitor) fetchGeo() {
+	geoClient := &http.Client{Timeout: 5 * time.Second}
+	resp, err := geoClient.Get(geoServiceURL)
+	if err != nil {
+		m.mu.Lock()
+		m.pingInfo = "Geo err: " + err.Error()
+		m.mu.Unlock()
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		m.mu.Lock()
+		m.pingInfo = "Geo read err: " + err.Error()
+		m.mu.Unlock()
+		return
+	}
+
+	var mullvadResp struct {
+		IP      string `json:"ip"`
+		Country string `json:"country"`
+		City    string `json:"city"`
+	}
+	if err := json.Unmarshal(body, &mullvadResp); err != nil {
+		m.mu.Lock()
+		m.pingInfo = "Geo JSON err: " + err.Error()
+		m.mu.Unlock()
+		return
+	}
+
+	m.mu.Lock()
+	m.lastGeo = GeoInfo{Country: mullvadResp.Country, City: mullvadResp.City}
+	m.lastGeoTime = time.Now()
+	m.pingInfo = fmt.Sprintf("Geo: %s", m.lastGeo.String())
+	m.mu.Unlock()
 }
 
 // --- internal ---
@@ -137,42 +180,33 @@ func (m *Monitor) pollLoop() {
 		m.mu.Unlock()
 	}()
 
+	// Initial measurements
 	m.resolveServerIP()
 	m.measurePing()
+	m.fetchGeo()
 
-	tickCount := 0
-	consecutiveFails := 0
+	// Three independent timers:
+	//   trafficTicker — fetch /connections every 2s
+	//   pingTicker    — TCP ping every 3s
+	//   stunAndGeoTicker — resolve IP + geo every 60s
+	trafficTicker := time.NewTicker(2 * time.Second)
+	pingTicker := time.NewTicker(3 * time.Second)
+	stunAndGeoTicker := time.NewTicker(60 * time.Second)
+	defer trafficTicker.Stop()
+	defer pingTicker.Stop()
+	defer stunAndGeoTicker.Stop()
+
 	for {
 		select {
-		case <-m.ticker.C:
-			tickCount++
-			hadPing := m.measurePing()
-
-			if hadPing {
-				consecutiveFails = 0
-			} else {
-				consecutiveFails++
-			}
-
-			// Re-resolve server IP aggressively:
-			//   - every 15 ticks normally
-			//   - every 5 ticks when pings keep failing (server may have changed)
-			//   - immediately after 3 consecutive fails
-			triggerResolve := tickCount%15 == 0
-			if !hadPing {
-				triggerResolve = triggerResolve || consecutiveFails >= 3 || tickCount%5 == 0
-			}
-			if triggerResolve {
-				m.resolveServerIP()
-				// If we got a new IP, reset fail counter
-				m.mu.Lock()
-				if m.serverIP != "" {
-					consecutiveFails = 0
-				}
-				m.mu.Unlock()
-			}
-
+		case <-trafficTicker.C:
 			m.sample()
+
+		case <-pingTicker.C:
+			m.measurePing()
+
+		case <-stunAndGeoTicker.C:
+			m.resolveServerIP()
+			m.fetchGeo()
 
 		case <-m.stopCh:
 			return
@@ -303,6 +337,7 @@ func (m *Monitor) sample() {
 	lastDelay := m.lastDelayMs
 	localAddr := m.localIP
 	diag := m.pingInfo
+	geo := m.lastGeo
 	m.mu.Unlock()
 
 	curDl, curUl, err := m.fetchTotals()
@@ -360,7 +395,9 @@ func (m *Monitor) sample() {
 		bindLabel = "direct"
 	}
 
-	m.statsCh <- NewTrafficStats(dlBps, ulBps, lastDelay, bindLabel, proxyAddr, pingOk, diag)
+	stats := NewTrafficStats(dlBps, ulBps, lastDelay, bindLabel, proxyAddr, pingOk, diag)
+	stats.Geo = geo
+	m.statsCh <- stats
 	m.mu.Unlock()
 }
 

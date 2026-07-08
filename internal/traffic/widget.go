@@ -31,6 +31,7 @@ type Widget struct {
 	proxyText *canvas.Text
 	addrText  *canvas.Text
 	infoText  *canvas.Text
+	geoText   *canvas.Text
 	status    *canvas.Text
 	refresh   *widget.Button
 
@@ -71,6 +72,10 @@ func NewWidget(cfg ClashConfig) *Widget {
 	w.infoText = canvas.NewText("Info: starting...", inactiveColor)
 	w.infoText.TextSize = 10
 
+	// Geo location line (country + city from Mullvad API)
+	w.geoText = canvas.NewText("📍 —", inactiveColor)
+	w.geoText.TextSize = 12
+
 	// Status line
 	w.status = canvas.NewText("Disconnected", inactiveColor)
 	w.status.TextSize = 9
@@ -103,6 +108,7 @@ func (w *Widget) Container() fyne.CanvasObject {
 	dlRow := container.NewHBox(w.dlText)
 	upRow := container.NewHBox(w.upText)
 	pingRow := container.NewHBox(w.pingText)
+	geoRow := container.NewHBox(w.geoText)
 	proxyRow := container.NewHBox(w.proxyText)
 	addrRow := container.NewHBox(w.addrText)
 	infoRow := container.NewHBox(w.infoText)
@@ -113,6 +119,7 @@ func (w *Widget) Container() fyne.CanvasObject {
 	)
 
 	body := container.NewVBox(
+		container.NewPadded(geoRow),
 		container.NewPadded(pingRow),
 		container.NewPadded(proxyRow),
 		container.NewPadded(addrRow),
@@ -174,6 +181,13 @@ func (w *Widget) statsLoop() {
 			} else {
 				w.addrText.Text = "Ping: —"
 			}
+			// Geo location
+			if s.Geo.IsZero() {
+				w.geoText.Text = "📍 —"
+			} else {
+				w.geoText.Text = "📍 " + s.Geo.String()
+			}
+
 			// Diagnostic info
 			if s.PingInfo != "" {
 				w.infoText.Text = "Info: " + s.PingInfo
@@ -199,6 +213,7 @@ func (w *Widget) statsLoop() {
 			canvas.Refresh(w.proxyText)
 			canvas.Refresh(w.addrText)
 			canvas.Refresh(w.infoText)
+			canvas.Refresh(w.geoText)
 			canvas.Refresh(w.status)
 		})
 	}

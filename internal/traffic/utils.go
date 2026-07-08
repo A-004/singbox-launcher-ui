@@ -5,6 +5,28 @@ import (
 	"time"
 )
 
+// GeoInfo holds geo-location data fetched from an external service.
+type GeoInfo struct {
+	Country string `json:"country"`
+	City    string `json:"city"`
+}
+
+// IsZero returns true when no geo data has been fetched yet.
+func (g GeoInfo) IsZero() bool {
+	return g.Country == "" && g.City == ""
+}
+
+// String returns a human-readable geo string like "Poland, Warsaw" or "—" when empty.
+func (g GeoInfo) String() string {
+	if g.IsZero() {
+		return "—"
+	}
+	if g.City != "" {
+		return g.Country + ", " + g.City
+	}
+	return g.Country
+}
+
 // TrafficStats holds a single traffic snapshot with formatted strings.
 type TrafficStats struct {
 	Down      float64 // bytes/sec
@@ -35,6 +57,10 @@ type TrafficStats struct {
 	// monitor is currently doing — e.g. "STUN OK: 2.27.42.36",
 	// "TCP 443: RST 10ms", "TCP 443: timeout", "No local bind IP".
 	PingInfo string
+
+	// Geo is the geo-location (country+city) of the current egress IP.
+	// Fetched periodically from an external geo-service through the tunnel.
+	Geo GeoInfo
 }
 
 // NewTrafficStats creates a TrafficStats from raw bps values.
