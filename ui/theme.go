@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -18,31 +19,31 @@ import (
 // ──────────────────────────────────────────────
 
 var (
-	AppleWindowBg      = color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xFF}       // #000000
-	AppleCardBg        = color.NRGBA{R: 0x1C, G: 0x1C, B: 0x1E, A: 0xFF}       // #1C1C1E
-	AppleCardBorder    = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0x14}       // rgba(255,255,255,0.08)
-	AppleTextPrimary   = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}       // #FFFFFF
-	AppleTextSecondary = color.NRGBA{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF}       // #8E8E93
-	AppleTextTertiary  = color.NRGBA{R: 0x6E, G: 0x6E, B: 0x73, A: 0xFF}       // #6E6E73
-	AppleBlue          = color.NRGBA{R: 0x00, G: 0x7A, B: 0xFF, A: 0xFF}       // #007AFF
-	AppleGreen         = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0xFF}       // #34C759
-	AppleOrange        = color.NRGBA{R: 0xFF, G: 0x9F, B: 0x0A, A: 0xFF}       // #FF9F0A
-	AppleRed           = color.NRGBA{R: 0xFF, G: 0x3B, B: 0x30, A: 0xFF}       // #FF3B30
-	AppleGray          = color.NRGBA{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF}       // #8E8E93
-	AppleClose         = color.NRGBA{R: 0xFF, G: 0x5F, B: 0x57, A: 0xFF}       // #FF5F57
-	AppleMinimize      = color.NRGBA{R: 0xFE, G: 0xBC, B: 0x2E, A: 0xFF}       // #FEBC2E
-	AppleMaximize      = color.NRGBA{R: 0x28, G: 0xC8, B: 0x40, A: 0xFF}       // #28C840
-	AppleChevron       = color.NRGBA{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF}       // #8E8E93 (dark)
-	AppleSeparator     = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0x0F}       // rgba(255,255,255,0.06)
-	ApplePowerOff      = color.NRGBA{R: 0x2C, G: 0x2C, B: 0x2E, A: 0xFF}       // #2C2C2E
-	ApplePowerOn       = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0xFF}       // #34C759
-	ApplePowerAura     = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0x4D}       // rgba(52,199,89,0.3)
-	AppleActiveGreen   = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0x14}       // rgba(52,199,89,0.08)
-	AppleActiveText    = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0xFF}       // #34C759
+	AppleWindowBg      = color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xFF} // #000000
+	AppleCardBg        = color.NRGBA{R: 0x1C, G: 0x1C, B: 0x1E, A: 0xFF} // #1C1C1E
+	AppleCardBorder    = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0x14} // rgba(255,255,255,0.08)
+	AppleTextPrimary   = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF} // #FFFFFF
+	AppleTextSecondary = color.NRGBA{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF} // #8E8E93
+	AppleTextTertiary  = color.NRGBA{R: 0x6E, G: 0x6E, B: 0x73, A: 0xFF} // #6E6E73
+	AppleBlue          = color.NRGBA{R: 0x00, G: 0x7A, B: 0xFF, A: 0xFF} // #007AFF
+	AppleGreen         = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0xFF} // #34C759
+	AppleOrange        = color.NRGBA{R: 0xFF, G: 0x9F, B: 0x0A, A: 0xFF} // #FF9F0A
+	AppleRed           = color.NRGBA{R: 0xFF, G: 0x3B, B: 0x30, A: 0xFF} // #FF3B30
+	AppleGray          = color.NRGBA{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF} // #8E8E93
+	AppleClose         = color.NRGBA{R: 0xFF, G: 0x5F, B: 0x57, A: 0xFF} // #FF5F57
+	AppleMinimize      = color.NRGBA{R: 0xFE, G: 0xBC, B: 0x2E, A: 0xFF} // #FEBC2E
+	AppleMaximize      = color.NRGBA{R: 0x28, G: 0xC8, B: 0x40, A: 0xFF} // #28C840
+	AppleChevron       = color.NRGBA{R: 0x8E, G: 0x8E, B: 0x93, A: 0xFF} // #8E8E93 (dark)
+	AppleSeparator     = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0x0F} // rgba(255,255,255,0.06)
+	ApplePowerOff      = color.NRGBA{R: 0x2C, G: 0x2C, B: 0x2E, A: 0xFF} // #2C2C2E
+	ApplePowerOn       = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0xFF} // #34C759
+	ApplePowerAura     = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0x4D} // rgba(52,199,89,0.3)
+	AppleActiveGreen   = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0x14} // rgba(52,199,89,0.08)
+	AppleActiveText    = color.NRGBA{R: 0x34, G: 0xC7, B: 0x59, A: 0xFF} // #34C759
 
 	// Titlebar / bottom nav — dark blur
-	AppleTitleBg   = color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xE0} // rgba(0,0,0,0.88)
-	AppleBottomBg  = color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xE6} // rgba(0,0,0,0.90)
+	AppleTitleBg  = color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xE0} // rgba(0,0,0,0.88)
+	AppleBottomBg = color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xE6} // rgba(0,0,0,0.90)
 )
 
 // ──────────────────────────────────────────────
@@ -121,10 +122,42 @@ func AppleTitlebar(title string, height float32) fyne.CanvasObject {
 
 // ApplePowerButton is a circular 88×88 power button with ON/OFF states.
 // ON: green fill with aura border ring. OFF: gray fill.
+// Implements fyne.Tappable + desktop.Hoverable for click handling.
 type ApplePowerButton struct {
 	widget.BaseWidget
 	on       bool
+	hovered  bool
 	onTapped func()
+}
+
+var _ fyne.Tappable = (*ApplePowerButton)(nil)
+var _ desktop.Hoverable = (*ApplePowerButton)(nil)
+
+// Tapped implements fyne.Tappable.
+func (b *ApplePowerButton) Tapped(*fyne.PointEvent) {
+	if b.onTapped != nil {
+		b.onTapped()
+	}
+}
+
+// MouseIn implements desktop.Hoverable.
+func (b *ApplePowerButton) MouseIn(*desktop.MouseEvent) {
+	b.hovered = true
+	b.Refresh()
+}
+
+// MouseOut implements desktop.Hoverable.
+func (b *ApplePowerButton) MouseOut() {
+	b.hovered = false
+	b.Refresh()
+}
+
+// MouseMoved implements desktop.Hoverable.
+func (b *ApplePowerButton) MouseMoved(*desktop.MouseEvent) {}
+
+// Cursor implements desktop.Cursorable.
+func (b *ApplePowerButton) Cursor() desktop.Cursor {
+	return desktop.PointerCursor
 }
 
 // NewApplePowerButton creates a new Apple-style power button.
@@ -157,13 +190,13 @@ func (b *ApplePowerButton) CreateRenderer() fyne.WidgetRenderer {
 
 	r.bgCircle = canvas.NewCircle(ApplePowerOff)
 
+	r.hoverCircle = canvas.NewCircle(color.Transparent)
+	r.hoverCircle.Hidden = true
+
 	r.shieldTxt = canvas.NewText("⏻", color.White)
 	r.shieldTxt.TextSize = 32
 
-	r.tapRec = widget.NewButton("", b.onTapped)
-	r.tapRec.Importance = widget.LowImportance
-
-	r.objects = []fyne.CanvasObject{r.auraRing, r.bgCircle, r.shieldTxt, r.tapRec}
+	r.objects = []fyne.CanvasObject{r.auraRing, r.bgCircle, r.hoverCircle, r.shieldTxt}
 	return r
 }
 
@@ -173,12 +206,12 @@ func (b *ApplePowerButton) MinSize() fyne.Size {
 }
 
 type applePowerButtonRenderer struct {
-	btn       *ApplePowerButton
-	objects   []fyne.CanvasObject
-	bgCircle  *canvas.Circle
-	auraRing  *canvas.Circle
-	shieldTxt *canvas.Text
-	tapRec    *widget.Button
+	btn         *ApplePowerButton
+	objects     []fyne.CanvasObject
+	bgCircle    *canvas.Circle
+	auraRing    *canvas.Circle
+	hoverCircle *canvas.Circle
+	shieldTxt   *canvas.Text
 }
 
 func (r *applePowerButtonRenderer) Layout(size fyne.Size) {
@@ -191,8 +224,8 @@ func (r *applePowerButtonRenderer) Layout(size fyne.Size) {
 	r.auraRing.Position1 = fyne.NewPos(cx-auraR, cy-auraR)
 	r.auraRing.Position2 = fyne.NewPos(cx+auraR, cy+auraR)
 
-	r.tapRec.Resize(size)
-	r.tapRec.Move(fyne.NewPos(0, 0))
+	r.hoverCircle.Position1 = fyne.NewPos(cx-rad, cy-rad)
+	r.hoverCircle.Position2 = fyne.NewPos(cx+rad, cy+rad)
 
 	if r.shieldTxt != nil {
 		ts := r.shieldTxt.MinSize()
@@ -216,8 +249,16 @@ func (r *applePowerButtonRenderer) Refresh() {
 		r.bgCircle.FillColor = ApplePowerOff
 		r.auraRing.Hidden = true
 	}
+	if r.btn.hovered {
+		// Subtle dim overlay when hovering
+		r.hoverCircle.FillColor = color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0x12}
+		r.hoverCircle.Hidden = false
+	} else {
+		r.hoverCircle.Hidden = true
+	}
 	canvas.Refresh(r.bgCircle)
 	canvas.Refresh(r.auraRing)
+	canvas.Refresh(r.hoverCircle)
 }
 
 func (r *applePowerButtonRenderer) Objects() []fyne.CanvasObject { return r.objects }
